@@ -1,0 +1,93 @@
+import { Request, Response } from 'express'
+import { prisma } from '../prisma/client'
+import { z } from 'zod'
+
+// Validação dos horários enviados
+const HorarioSchema = z.object({
+  data: z.string(),        // "2025-08-06"
+  horaInicio: z.string(),  // "02:00"
+  horaFim: z.string(),     // "16:00"
+})
+
+const BodySchema = z.object({
+  horarios: z.array(HorarioSchema)
+})
+
+const AgendamentoSchema = z.object({
+  salaId: z.number(),
+  responsavel: z.string().min(1),
+  horarios: z.array(
+    z.object({
+      data: z.string(),       // "YYYY-MM-DD"
+      horaInicio: z.string(), // "HH:mm"
+      horaFim: z.string()     // "HH:mm"
+    })
+  )
+})
+
+export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
+  try {
+    const { horarios } = BodySchema.parse(req.body)
+
+    // Obter todas as salas ativas com seus agendamentos
+    const salasAtivas = await prisma.room.findMany({
+      where: { active: true },
+      include: { periods: true }
+    })
+
+    // Verificar se há conflito com algum horário solicitado
+    const salasDisponiveis = salasAtivas.filter(sala => {
+      return horarios.every(horario => {
+        const dia = new Date(horario.data)
+
+        const temConflito = sala.periods.some(period => {
+          const mesmoDia = new Date(period.day).toDateString() === dia.toDateString()
+          if (!mesmoDia) return false
+
+          return !(
+            horario.horaFim <= period.start || horario.horaInicio >= period.end
+          )
+        })
+
+        return !temConflito
+      })
+    })
+
+    // Retornar apenas as informações relevantes
+    return res.status(200).json(salasDisponiveis.map(sala => ({
+      id: sala.id,
+      nome: sala.number,
+      tipo: sala.tipo ?? '',
+      bloco: sala.bloco,
+      status: sala.active ? 'active' : 'inactive'
+    })))
+  } catch (error) {
+    console.error(error)
+    return res.status(400).json({ message: 'Erro ao buscar salas disponíveis.' })
+  }
+}
+
+export const agendarSala = async (req: Request, res: Response) => {
+  try {
+    const { salaId, responsavel, horarios } = AgendamentoSchema.parse(req.body)
+
+    const registros = horarios.map(({ data, horaInicio, horaFim }) => ({
+      roomId: salaId,
+      day: new Date(data),
+      start: horaInicio,
+      end: horaFim,
+      nome: responsavel,
+      isRecurring: false,
+      createdAt: new Date()
+    }))
+
+    await prisma.roomPeriod.createMany({
+      data: registros
+    })
+
+    return res.status(201).json({ message: 'Agendamento criado com sucesso.' })
+  } catch (error) {
+    console.error('Erro ao agendar sala:', error)
+    return res.status(400).json({ message: 'Erro ao agendar sala.' })
+  }
+}

@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id          Int           @id @default(autoincrement())
+  number      String        // Deixou de ser Int e não é mais único
+  description String?
+  bloco       String
+  tipo        String?
+  active      Boolean       @default(true)
+  periods     RoomPeriod[]
+  history     PeriodHistory[]
+}
+
+model RoomPeriod {
+  id          Int      @id @default(autoincrement())
+  roomId      Int
+  room        Room     @relation(fields: [roomId], references: [id])
+  day         DateTime
+  start       String  
+  end         String   
+  nome        String   
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model PeriodHistory {
+  id         Int      @id @default(autoincrement())
+  roomId     Int
+  room       Room     @relation(fields: [roomId], references: [id])
+  day        DateTime
+  start      String
+  end        String
+  nome       String
+  archivedAt DateTime @default(now())
+}
