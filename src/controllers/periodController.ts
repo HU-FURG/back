@@ -25,6 +25,9 @@ const AgendamentoSchema = z.object({
   )
 })
 
+type BuscarSalasBody = z.infer<typeof BodySchema>
+type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
+
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
     const { horarios } = BodySchema.parse(req.body)
