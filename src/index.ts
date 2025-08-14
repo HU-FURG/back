@@ -4,6 +4,7 @@ import cors from 'cors';
 import cron from 'node-cron'
 import roomRoutes from './routes/roomRoutes';
 import periodRoutes from './routes/periodRoutes'
+import userRoutes from './routes/userRoutes'
 
 import { clearPeriodsandUpdate } from './prisma/clear';
 
@@ -12,13 +13,14 @@ const PORT = 3333;
 
 app.use(cors({
   origin: 'http://localhost:5173',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
+  methods: ['GET', 'POST', 'PUT'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }))
 app.use(express.json());
 
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
+app.use('/api', userRoutes);
 
 
 app.listen(PORT, () => {
