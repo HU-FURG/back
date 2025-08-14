@@ -12,26 +12,25 @@ RUN npm install
 # Copia o código fonte
 COPY src ./src
 
-# Gera cliente do Prisma
+# Gera cliente do Prisma com linux-musl (para Alpine/Koyeb)
 RUN npx prisma generate
 
 # Compila TypeScript para JavaScript
 RUN npm run build
 
-
-# Etapa 2: Imagem final
+# Etapa 2: Imagem final leve
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copia somente o necessário
+# Copia dependências, build e Prisma
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
 
-# Porta usada pelo Express
+# Porta dinâmica (usada pelo Koyeb)
 EXPOSE 3000
 
 # Comando para iniciar
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/app.js"]

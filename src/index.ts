@@ -12,15 +12,18 @@ const app = express();
 app.use(express.json());
 
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-}))
+}));
+
 
 
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
+app.get('/api/health', (req, res) => res.sendStatus(200));
+
 
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => {
