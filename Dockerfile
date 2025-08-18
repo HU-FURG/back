@@ -30,7 +30,7 @@ COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/dist ./dist
 
 # Porta dinâmica (usada pelo Koyeb)
-EXPOSE 3000
+EXPOSE 8000
 
 # Comando para iniciar
 CMD ["node", "dist/index.js"]

@@ -23,7 +23,9 @@ app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
 app.get('/api/health', (req, res) => res.sendStatus(200));
-
+app.get('/', (req, res) =>{
+  res.send("success deploy!")
+})
 
 const PORT = process.env.PORT || 3333;
 app.listen(PORT, () => {
