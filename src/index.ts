@@ -22,13 +22,13 @@ app.use(cors({
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
-app.get('/api/health', (req, res) => res.sendStatus(200));
+app.get('/health', (req, res) => res.sendStatus(200));
 app.get('/', (req, res) =>{
   res.send("success deploy!")
 })
 
-const PORT = process.env.PORT || 3333;
-app.listen(PORT, () => {
+const PORT = Number(process.env.PORT) || 3333; 
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 
   // Fazer a manutenção dos dados historicos
