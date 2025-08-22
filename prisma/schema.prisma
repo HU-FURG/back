@@ -9,11 +9,12 @@ datasource db {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  login      String   @unique
-  senha      String
-  hierarquia String    
-  createdAt  DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  login         String   @unique
+  senha         String
+  hierarquia    String    
+  lastLogin_at DateTime?
+  createdAt     DateTime @default(now())
 
   roomPeriods RoomPeriod[]
   histories   PeriodHistory[]

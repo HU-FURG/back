@@ -5,6 +5,7 @@ import cron from 'node-cron'
 import roomRoutes from './routes/roomRoutes'
 import periodRoutes from './routes/periodRoutes'
 import userRoutes from './routes/userRoutes'
+import cookieParser from 'cookie-parser'
 
 import { clearPeriodsandUpdate } from './prisma/clear';
 
@@ -15,9 +16,10 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   methods: ['GET', 'POST', 'PUT'],
   allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
 }));
 
-
+app.use(cookieParser()); 
 
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
