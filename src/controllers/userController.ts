@@ -26,11 +26,12 @@ export async function login(req: Request, res: Response) {
       return res.status(401).json({ error: 'Login ou senha incorretos' });
     }
 
-    // hash em breve
-    if (!user || user.senha !== senha) {
+    // compara a senha digitada com o hash do banco
+    const senhaValida = await bcrypt.compare(senha, user.senha);
+    if (!senhaValida) {
       return res.status(401).json({ error: 'Login ou senha incorretos' });
     }
-
+    
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -71,12 +72,18 @@ export async function validateToken(req: Request, res: Response) {
 }
 
 export function logout(req: Request, res: Response) {
-  res.clearCookie("token", {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-  });
-  return res.status(200).json({ success: true });
+  try {
+    res.clearCookie("token", {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+    });
+
+    return res.status(200).json({ success: true, message: "Logout realizado com sucesso" });
+  } catch (err) {
+    console.error("Erro no logout:", err);
+    return res.status(500).json({ error: "Erro interno no logout" });
+  }
 }
 
 

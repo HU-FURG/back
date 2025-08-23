@@ -17,6 +17,7 @@ export function authenticateToken(req: Request, res: Response, next: NextFunctio
 
 export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   const userLogin = (req as any).user?.login; //!chega aqui?
+  console.log('userlogin-', userLogin)
   if (!userLogin) return res.status(401).json({ error: "Não autenticado" });
 
   const user = await prisma.user.findUnique({ where: { login: userLogin } });
