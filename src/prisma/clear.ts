@@ -9,7 +9,7 @@ export const clearPeriodsandUpdate = async () => {
       // 1. Processar períodos não recorrentes
       const antigosNaoRecorrentes = await tx.roomPeriod.findMany({
         where: {
-          day: { lt: agora },  // usa "day" em vez de startTime
+          start: { lt: agora },  // usa "start" em vez de day
           isRecurring: false,
         },
       });
@@ -20,7 +20,6 @@ export const clearPeriodsandUpdate = async () => {
           data: antigosNaoRecorrentes.map((p) => ({
             roomId: p.roomId,
             userId: p.userId ?? null,
-            day: p.day,
             start: p.start,
             end: p.end,
             nome: p.nome,
@@ -39,7 +38,7 @@ export const clearPeriodsandUpdate = async () => {
       // 2. Processar períodos recorrentes
       const recorrentes = await tx.roomPeriod.findMany({
         where: {
-          day: { lt: agora }, // usa "day"
+          start: { lt: agora }, // usa "start"
           isRecurring: true,
         },
       });
@@ -50,7 +49,6 @@ export const clearPeriodsandUpdate = async () => {
           data: {
             roomId: period.roomId,
             userId: period.userId ?? null,
-            day: period.day,
             start: period.start,
             end: period.end,
             nome: period.nome,
@@ -59,15 +57,17 @@ export const clearPeriodsandUpdate = async () => {
         });
 
         // Atualizar para a próxima semana
-        const novaDay = new Date(period.day);
-        novaDay.setDate(novaDay.getDate() + 7);
+        const novaStart = new Date(period.start);
+        const novaEnd = new Date(period.end);
+
+        novaStart.setDate(novaStart.getDate() + 7);
+        novaEnd.setDate(novaEnd.getDate() + 7);
 
         await tx.roomPeriod.update({
           where: { id: period.id },
           data: {
-            day: novaDay,
-            start: period.start,
-            end: period.end,
+            start: novaStart,
+            end: novaEnd,
           },
         });
       }
