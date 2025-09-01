@@ -28,6 +28,9 @@ const AgendamentoSchema = z.object({
 type BuscarSalasBody = z.infer<typeof BodySchema>
 type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
+// ----------------------
+// BUSCAR SALAS DISPONÍVEIS
+// ----------------------
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
     const { horarios } = BodySchema.parse(req.body)
@@ -38,55 +41,55 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
       include: { periods: true }
     })
 
-    // Verificar se há conflito com algum horário solicitado
     const salasDisponiveis = salasAtivas.filter(sala => {
       return horarios.every(horario => {
-        const dia = new Date(horario.data)
+        const inicioReq = new Date(`${horario.data}T${horario.horaInicio}:00`)
+        const fimReq = new Date(`${horario.data}T${horario.horaFim}:00`)
 
         const temConflito = sala.periods.some(period => {
-          const mesmoDia = new Date(period.day).toDateString() === dia.toDateString()
-          if (!mesmoDia) return false
+          const start = new Date(period.start)
+          const end = new Date(period.end)
 
-          return !(
-            horario.horaFim <= period.start || horario.horaInicio >= period.end
-          )
+          // verifica sobreposição
+          return !(fimReq <= start || inicioReq >= end)
         })
 
         return !temConflito
       })
     })
 
-    // Retornar apenas as informações relevantes
-    return res.status(200).json(salasDisponiveis.map(sala => ({
-      id: sala.id,
-      nome: sala.number,
-      tipo: sala.tipo ?? '',
-      bloco: sala.bloco,
-      status: sala.active ? 'active' : 'inactive'
-    })))
+    return res.status(200).json(
+      salasDisponiveis.map(sala => ({
+        id: sala.id,
+        nome: sala.number,
+        tipo: sala.tipo ?? '',
+        bloco: sala.bloco,
+        status: sala.active ? 'active' : 'inactive'
+      }))
+    )
   } catch (error) {
     console.error(error)
     return res.status(400).json({ message: 'Erro ao buscar salas disponíveis.' })
   }
 }
 
+// ----------------------
+// AGENDAR SALA
+// ----------------------
 export const agendarSala = async (req: Request, res: Response) => {
   try {
     const { salaId, responsavel, horarios } = AgendamentoSchema.parse(req.body)
 
     const registros = horarios.map(({ data, horaInicio, horaFim }) => ({
       roomId: salaId,
-      day: new Date(data),
-      start: horaInicio,
-      end: horaFim,
+      start: new Date(`${data}T${horaInicio}:00`),
+      end: new Date(`${data}T${horaFim}:00`),
       nome: responsavel,
       isRecurring: false,
       createdAt: new Date()
     }))
 
-    await prisma.roomPeriod.createMany({
-      data: registros
-    })
+    await prisma.roomPeriod.createMany({ data: registros })
 
     return res.status(201).json({ message: 'Agendamento criado com sucesso.' })
   } catch (error) {

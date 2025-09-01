@@ -4,6 +4,7 @@ CREATE TABLE "public"."User" (
     "login" TEXT NOT NULL,
     "senha" TEXT NOT NULL,
     "hierarquia" TEXT NOT NULL,
+    "lastLogin_at" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
@@ -26,9 +27,8 @@ CREATE TABLE "public"."RoomPeriod" (
     "id" SERIAL NOT NULL,
     "roomId" INTEGER NOT NULL,
     "userId" INTEGER,
-    "day" TIMESTAMP(3) NOT NULL,
-    "start" TEXT NOT NULL,
-    "end" TEXT NOT NULL,
+    "start" TIMESTAMP(3) NOT NULL,
+    "end" TIMESTAMP(3) NOT NULL,
     "nome" TEXT NOT NULL,
     "isRecurring" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -41,9 +41,8 @@ CREATE TABLE "public"."PeriodHistory" (
     "id" SERIAL NOT NULL,
     "roomId" INTEGER NOT NULL,
     "userId" INTEGER,
-    "day" TIMESTAMP(3) NOT NULL,
-    "start" TEXT NOT NULL,
-    "end" TEXT NOT NULL,
+    "start" TIMESTAMP(3) NOT NULL,
+    "end" TIMESTAMP(3) NOT NULL,
     "nome" TEXT NOT NULL,
     "archivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -52,6 +51,12 @@ CREATE TABLE "public"."PeriodHistory" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_login_key" ON "public"."User"("login");
+
+-- CreateIndex
+CREATE INDEX "RoomPeriod_roomId_start_idx" ON "public"."RoomPeriod"("roomId", "start");
+
+-- CreateIndex
+CREATE INDEX "RoomPeriod_roomId_end_idx" ON "public"."RoomPeriod"("roomId", "end");
 
 -- AddForeignKey
 ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "public"."Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

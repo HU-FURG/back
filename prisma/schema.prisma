@@ -9,12 +9,12 @@ datasource db {
 }
 
 model User {
-  id            Int      @id @default(autoincrement())
-  login         String   @unique
-  senha         String
-  hierarquia    String    
+  id          Int      @id @default(autoincrement())
+  login       String   @unique
+  senha       String
+  hierarquia  String    
   lastLogin_at DateTime?
-  createdAt     DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   roomPeriods RoomPeriod[]
   histories   PeriodHistory[]
@@ -36,25 +36,25 @@ model RoomPeriod {
   id          Int      @id @default(autoincrement())
   roomId      Int
   userId      Int?     
-  day         DateTime
-  start       String  
-  end         String   
+  start       DateTime 
+  end         DateTime   
   nome        String   
-
   isRecurring Boolean  @default(false)
   createdAt   DateTime @default(now())
 
   room        Room     @relation(fields: [roomId], references: [id])
   user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([roomId, start])
+  @@index([roomId, end])
 }
 
 model PeriodHistory {
   id         Int      @id @default(autoincrement())
   roomId     Int
   userId     Int?
-  day        DateTime
-  start      String
-  end        String
+  start      DateTime 
+  end        DateTime 
   nome       String
   archivedAt DateTime @default(now())
 

@@ -2,11 +2,15 @@
 import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron'
+import cookieParser from 'cookie-parser'
+
+// routes
+import dashboardRoutes from './routes/dashboardRoutes'
 import roomRoutes from './routes/roomRoutes'
 import periodRoutes from './routes/periodRoutes'
 import userRoutes from './routes/userRoutes'
-import cookieParser from 'cookie-parser'
 
+// routine
 import { clearPeriodsandUpdate } from './prisma/clear';
 
 const app = express();
@@ -24,7 +28,9 @@ app.use(cookieParser());
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
+app.use('/api', dashboardRoutes)
 app.get('/health', (req, res) => res.sendStatus(200));
+
 app.get('/', (req, res) =>{
   res.send("success deploy!")
 })
