@@ -9,6 +9,7 @@ import dashboardRoutes from './routes/dashboardRoutes'
 import roomRoutes from './routes/roomRoutes'
 import periodRoutes from './routes/periodRoutes'
 import userRoutes from './routes/userRoutes'
+import schedulingRoutes from './routes/schedulingRouter'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
@@ -29,6 +30,7 @@ app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
 app.use('/api', dashboardRoutes)
+app.use('/api/scheduling', schedulingRoutes)
 app.get('/health', (req, res) => res.sendStatus(200));
 
 app.get('/', (req, res) =>{
@@ -40,7 +42,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 
   // Fazer a manutenção dos dados historicos
-  cron.schedule('0 0 * * 6', async()=> {
+  cron.schedule('0 0 * * *', async()=> {
     console.log('executando Limpeza semana ...')
     await clearPeriodsandUpdate();
   })
