@@ -14,7 +14,6 @@ export const occupation = async (req: Request, res: Response) => {
   try {
     const { inicio, fim } = PeriodoSchema.parse(req.body)
 
-    // Normalizar datas para filtro no banco
     const dataInicioPrisma = new Date(inicio)
     dataInicioPrisma.setHours(0, 0, 0, 0)
 
@@ -32,10 +31,10 @@ export const occupation = async (req: Request, res: Response) => {
     })
     const totalSalas = salasAtivas.length
     if (totalSalas === 0) {
-      return res.status(200).json({  dados: [] })
+      return res.status(200).json({ dados: [] })
     }
 
-    // Buscar todos os períodos que se sobrepõem ao intervalo
+    // Buscar períodos sobrepostos
     const periodos = await prisma.roomPeriod.findMany({
       where: {
         start: { lte: dataFimPrisma },
@@ -46,7 +45,6 @@ export const occupation = async (req: Request, res: Response) => {
 
     // Criar mapa dia -> salas ocupadas
     const ocupacaoPorDia: Record<string, Set<number>> = {}
-
     for (const p of periodos) {
       const diaInicio = new Date(p.start)
       diaInicio.setHours(0, 0, 0, 0)
