@@ -6,12 +6,13 @@ import {
   editRoom,
   deleteRooms,
 } from '../controllers/roomController';
+import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.post('/room', createRoom);
-router.get('/rooms', listRooms);
-router.put('/room/:id', editRoom);
-router.post('/rooms/delete', deleteRooms);
+router.post('/room',authenticateToken, createRoom);
+router.get('/rooms',authenticateToken, listRooms);
+router.put('/room/:id',authenticateToken, editRoom);
+router.post('/rooms/delete',authenticateToken, deleteRooms);
 
 export default router;

@@ -5,10 +5,11 @@ import {
 buscarSalasDisponiveis, 
 agendarSala
 } from '../controllers/periodController';
+import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.post('/buscarhorario', buscarSalasDisponiveis)
-router.post('/agendar', agendarSala)
+router.post('/buscarhorario',authenticateToken, buscarSalasDisponiveis)
+router.post('/agendar',authenticateToken, agendarSala)
 
 export default router;

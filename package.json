@@ -24,6 +24,7 @@
     "date-fns": "^4.1.0",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.1",
     "node-cron": "^4.0.7",
     "zod": "^3.25.42"
   },
@@ -32,6 +33,7 @@
     "@types/cookie-parser": "^1.4.9",
     "@types/cors": "^2.8.18",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
     "@types/node": "^22.15.21",
     "electron": "^36.3.2",
     "prisma": "^6.13.0",

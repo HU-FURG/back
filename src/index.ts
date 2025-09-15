@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron'
 import cookieParser from 'cookie-parser'
+import morgan from 'morgan';
 
 // routes
 import dashboardRoutes from './routes/dashboardRoutes'
@@ -26,6 +27,10 @@ app.use(cors({
 
 app.use(cookieParser()); 
 
+morgan.token('body', (req: any) => JSON.stringify(req.body));
+
+app.use(morgan(':method :url :status :response-time ms - body=:body'));
+
 app.use('/api', roomRoutes);
 app.use('/api', periodRoutes);
 app.use('/api', userRoutes);
@@ -43,7 +48,7 @@ app.listen(PORT, "0.0.0.0", () => {
 
   // Fazer a manutenção dos dados historicos
   cron.schedule('0 0 * * *', async()=> {
-    console.log('executando Limpeza semana ...')
+    console.log('executando Limpeza dia...')
     await clearPeriodsandUpdate();
   })
 });
