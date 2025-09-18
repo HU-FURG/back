@@ -4,6 +4,7 @@ import cors from 'cors';
 import cron from 'node-cron'
 import cookieParser from 'cookie-parser'
 import morgan from 'morgan';
+import path from 'path';
 
 // routes
 import dashboardRoutes from './routes/dashboardRoutes'
@@ -16,7 +17,10 @@ import schedulingRoutes from './routes/schedulingRouter'
 import { clearPeriodsandUpdate } from './prisma/clear';
 
 const app = express();
+
 app.use(express.json());
+
+app.use(express.static(path.join(__dirname, '../public')));
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -38,9 +42,9 @@ app.use('/api', dashboardRoutes)
 app.use('/api/scheduling', schedulingRoutes)
 app.get('/health', (req, res) => res.sendStatus(200));
 
-app.get('/', (req, res) =>{
-  res.send("success deploy!")
-})
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public', 'index.html'));
+});
 
 const PORT = Number(process.env.PORT) || 3333; 
 app.listen(PORT, "0.0.0.0", () => {

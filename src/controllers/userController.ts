@@ -14,25 +14,25 @@ const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
 export async function login(req: Request, res: Response) {
   try {
-    console.log("👉 Requisição de login recebida:", req.body);
+    console.log(" Requisição de login recebida:", req.body);
 
     const { login, senha, remember } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({
       where: { login },
     });
-    console.log("🔍 Usuário encontrado no banco:", user);
+    console.log(" Usuário encontrado no banco:", user);
 
     if (!user) {
-      console.warn("⚠️ Usuário não existe:", login);
+      console.warn(" Usuário não existe:", login);
       return res.status(401).json({ error: 'Login ou senha incorretos' });
     }
 
     const senhaValida = await bcrypt.compare(senha, user.senha);
-    console.log("🔑 Senha válida?", senhaValida);
+    console.log("Senha válida?", senhaValida);
 
     if (!senhaValida) {
-      console.warn("⚠️ Senha inválida para usuário:", login);
+      console.warn(" Senha inválida para usuário:", login);
       return res.status(401).json({ error: 'Login ou senha incorretos' });
     }
     
@@ -47,17 +47,18 @@ export async function login(req: Request, res: Response) {
       JWT_SECRET,
       { expiresIn: remember ? '30d' : '24h' }
     );
-    console.log("✅ Token JWT gerado:", token.substring(0, 20) + "...");
+    console.log("Token JWT gerado:", token.substring(0, 20) + "...");
+
+    const isProduction = process.env.NODE_ENV === "production";
 
     res.cookie('token', token, {
       httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: isProduction,             // só HTTPS em produção
+      sameSite: isProduction ? 'lax' : 'lax', // em produção = Lax (primeira parte), dev pode ser Lax também
       maxAge: remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
     });
-
     const cargo = user.hierarquia;
-    console.log("✅ Login bem sucedido:", { login, cargo });
+    console.log("Login bem sucedido:", { login, cargo });
     return res.status(200).json({ login, cargo });
 
   } catch (error) {
