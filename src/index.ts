@@ -23,7 +23,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || 'http://localhost:3333' || "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app",
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', "If-None-Match"],
   credentials: true,
