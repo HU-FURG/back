@@ -35,19 +35,20 @@ export async function listScheduling(req: Request, res: Response) {
 
     const agora = new Date();
 
-    // base filters
-    const filters: any = {
-      end: { gt: agora }, 
-    };
+    // Filtros principais
+    const filters: any = {};
 
-  
     if (date) {
+      // Filtra todas reservas do dia selecionado
       const startOfDay = new Date(date + "T00:00:00");
       const endOfDay = new Date(date + "T23:59:59");
       filters.start = { gte: startOfDay, lte: endOfDay };
+    } else {
+      // Sem data: apenas futuras reservas
+      filters.end = { gt: agora };
     }
 
-    // filtros que dependem da sala
+    // Filtros de sala
     const roomFilters: any = {};
     if (bloco) roomFilters.bloco = { contains: bloco, mode: "insensitive" };
     if (number) roomFilters.number = { contains: number, mode: "insensitive" };
@@ -72,22 +73,22 @@ export async function listScheduling(req: Request, res: Response) {
         nome: true,
         isRecurring: true,
         room: {
-        select: {
+          select: {
             id: true,
             number: true,
             description: true,
             bloco: true,
             tipo: true,
-        }
+          },
         },
         user: {
-        select: {
+          select: {
             id: true,
             login: true,
             hierarquia: true,
-        }
-        }
-    },
+          },
+        },
+      },
       orderBy: { start: "asc" },
       skip,
       take: pageSize,
@@ -104,7 +105,6 @@ export async function listScheduling(req: Request, res: Response) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
-
 
 
 // Cancelar agendamento
