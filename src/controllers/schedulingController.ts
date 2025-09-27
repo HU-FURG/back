@@ -23,13 +23,14 @@ export async function listScheduling(req: Request, res: Response) {
     bloco: z.string().optional(),
     number: z.string().optional(),
     tipo: z.string().optional(),
-    date: z.string().optional(), // formato esperado: YYYY-MM-DD
+    dateStart: z.string().optional(),
+    dateEnd: z.string().optional(),
   });
 
   try {
-    const { page, bloco, number, tipo, date } = schema.parse(req.query);
-
-    const pageSize = 10;
+    const { page, bloco, number, tipo, dateStart, dateEnd } = schema.parse(req.query);
+    console.log(req.query)
+    const pageSize = 12;
     const currentPage = parseInt(page || "1", 10);
     const skip = (currentPage - 1) * pageSize;
 
@@ -38,14 +39,17 @@ export async function listScheduling(req: Request, res: Response) {
     // Filtros principais
     const filters: any = {};
 
-    if (date) {
+    if (dateStart) {
       // Filtra todas reservas do dia selecionado
-      const startOfDay = new Date(date + "T00:00:00");
-      const endOfDay = new Date(date + "T23:59:59");
+      const startOfDay = new Date(dateStart + "T00:00:00");
+      const endOfDay = dateEnd? new Date(dateEnd + "T23:59:59") : new Date(dateStart + "T23:59:59")
       filters.start = { gte: startOfDay, lte: endOfDay };
     } else {
-      // Sem data: apenas futuras reservas
-      filters.end = { gt: agora };
+      // Sem data: apenas reservas do dia
+      const startOfToday = new Date(agora.toISOString().split("T")[0] + "T00:00:00");
+      const endOfToday = new Date(agora.toISOString().split("T")[0] + "T23:59:59");
+
+      filters.start = { gte: startOfToday, lte: endOfToday };
     }
 
     // Filtros de sala
