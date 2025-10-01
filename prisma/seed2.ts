@@ -29,11 +29,12 @@ async function main() {
 
   for (let i = 0; i < totalSalas; i++) {
     const numero = Math.floor(Math.random() * 900) + 100; // 100 a 999
+    const bloco = getRandomBloco()
     salasData.push({
       number: numero.toString(),
-      bloco: getRandomBloco(),
+      bloco: bloco,
       tipo: getRandomTipo(),
-      description: `Sala ${numero} do bloco ${getRandomBloco()}`,
+      description: `Sala ${numero} do bloco ${bloco}`,
       active: true,
     });
   }
@@ -49,7 +50,7 @@ async function main() {
 const user = await prisma.user.upsert({
   where: { login: "admin" },
   update: {},
-  create: { login: "admin", senha: "123456", hierarquia: "admin" },
+  create: { login: "admin", senha: "admin", hierarquia: "admin" },
 });
 
   // Criar reservas aleatórias
@@ -63,16 +64,16 @@ const user = await prisma.user.upsert({
     const diaOffset = Math.floor(Math.random() * 30); // próximos 30 dias
     const inicio = new Date(hoje);
     inicio.setDate(inicio.getDate() + diaOffset);
-    inicio.setHours(Math.floor(Math.random() * 8) + 8, 0, 0, 0); // entre 8h e 15h
+    inicio.setHours(Math.floor(Math.random() * 8) + 12, 0, 0, 0);
 
     const fim = new Date(inicio);
-    fim.setHours(fim.getHours() + Math.floor(Math.random() * 3) + 1); // 1 a 3 horas de duração
+    fim.setHours(fim.getHours() + Math.floor(Math.random() * 4) + 4);
 
     await prisma.roomPeriod.create({
       data: {
         roomId: room.id,
         userId: user.id,
-        nome: `Reserva ${i + 1}`,
+        nome: `Pessoa ${ Math.floor(Math.random() * 10) + 1}`,
         start: inicio,
         end: fim,
         isRecurring: Math.random() < 0.3, // 30% recorrente

@@ -2,7 +2,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../prisma/client';
 import { z } from 'zod';
-import { console } from 'inspector';
 
 const timeSlotSchema = z.object({
   start: z.string().refine(val => !isNaN(Date.parse(val)), {
@@ -26,6 +25,9 @@ export async function createRoom(req: Request, res: Response) {
   try {
     const data = schema.parse(req.body);
 
+    // Verifica se corpo está vazio
+    if (!data.number || !data.bloco ) return res.status(400).json({ message: 'O número da sala e o bloco são campos obrigatórios.' });
+   
     // Verifica se já existe sala com mesmo número e mesmo bloco
     const exists = await prisma.room.findFirst({
       where: {
@@ -55,44 +57,11 @@ export async function createRoom(req: Request, res: Response) {
 }
 
 export async function listRooms(req: Request, res: Response) {
-  const schema = z.object({
-    number: z.string().optional(),
-    tipo: z.string().optional(),
-    bloco: z.string().optional(),
-    page: z.string().optional(),
-    active: z.string().optional(),
-  });
-  console.log('salas')
   try {
-    const { number, tipo, bloco, page, active } = schema.parse(req.query);
-
-    const pageSize = 9;
-    const currentPage = parseInt(page || "1", 10);
-    const skip = (currentPage - 1) * pageSize;
-
-    const filters: any = {};
-
-    if (number) { filters.number = { contains: number, mode: "insensitive"};}
-    if (tipo) filters.tipo = { contains: tipo, mode: "insensitive" };
-    if (bloco) filters.bloco = { contains: bloco, mode: "insensitive" };
-    if (active !== undefined) filters.active = active === "true";
-
-    const total = await prisma.room.count({
-      where: Object.keys(filters).length ? filters : undefined,
-    });
-
-    const rooms = await prisma.room.findMany({
-      where: Object.keys(filters).length ? filters : undefined,
-      take: pageSize,
-      skip,
-      orderBy: { number: "asc" },
-    });
+    const rooms = await prisma.room.findMany()
 
     return res.status(200).json({
       data: rooms,
-      total,
-      currentPage,
-      totalPages: Math.ceil(total / pageSize),
     });
 
   } catch (error) {
@@ -186,3 +155,91 @@ export async function deleteRooms(req: Request, res: Response) {
   }
 }
 
+// Função auxiliar para calcular o início e o fim da semana atual
+function getWeekRange(): { startOfWeek: Date, endOfWeek: Date } {
+    const now = new Date();
+    // Ajusta para o fuso horário local para evitar problemas de meia-noite
+    now.setHours(0, 0, 0, 0); 
+
+    // Calcula o dia da semana (0 = Domingo, 1 = Segunda, ..., 6 = Sábado)
+    const dayOfWeek = now.getDay(); 
+
+    // O início da semana (Segunda-feira)
+    // Se hoje é Domingo (0), precisa voltar 6 dias para a Segunda anterior.
+    // Senão, volta (dayOfWeek - 1) dias.
+    const startOfWeek = new Date(now);
+    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1; 
+    startOfWeek.setDate(now.getDate() - daysToSubtract);
+    
+    // O fim da semana (Sábado à meia-noite)
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    // Configura o horário para o final do dia de Sábado (23:59:59.999)
+    endOfWeek.setHours(23, 59, 59, 999); 
+
+    return { startOfWeek, endOfWeek };
+}
+
+
+export async function getRoomSchedule(req: Request, res: Response) {
+    const { roomId } = req.params;
+
+    if (!roomId || isNaN(Number(roomId))) {
+        return res.status(400).json({ message: 'ID da sala inválido.' });
+    }
+
+    try {
+        const roomIdNumber = Number(roomId);
+        const { startOfWeek, endOfWeek } = getWeekRange();
+
+        const reservations = await prisma.roomPeriod.findMany({
+            where: {
+                roomId: roomIdNumber,
+                start: {
+                    gte: startOfWeek, // Greater than or equal (>= Início da Semana)
+                },
+                end: {
+                    lte: endOfWeek,   // Less than or equal (<= Fim da Semana)
+                },
+            },
+            // Você pode incluir informações adicionais da reserva, se necessário (ex: responsável)
+            select: {
+                id: true,
+                start: true,
+                end: true,
+                // Outros campos relevantes
+            },
+            orderBy: {
+                start: 'asc',
+            }
+        });
+
+        // 2. Formata a resposta para o front-end
+        const formattedSchedule = reservations.map(res => {
+            
+            // CONVERSÃO NECESSÁRIA: Crie um novo objeto Date a partir da string
+            const startTimeDate = new Date(res.start);
+            const endTimeDate = new Date(res.end);
+
+            // Calcula o dia da semana: 0=Dom, 1=Seg...
+            // Ajustamos para 1=Seg, 7=Dom para facilitar a visualização no front
+            const jsDay = startTimeDate.getDay();
+            const dayOfWeek = jsDay === 0 ? 7 : jsDay; 
+
+            return ({
+                id: res.id,
+                dayOfWeek: dayOfWeek,
+                
+                // Agora, chame os métodos toLocaleTimeString na nova variável Date
+                startTime: startTimeDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                endTime: endTimeDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            });
+        });
+
+        return res.status(200).json(formattedSchedule);
+
+    } catch (error) {
+        console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
+        return res.status(500).json({ error: 'Erro interno do servidor ao buscar a agenda.' });
+    }
+}

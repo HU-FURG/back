@@ -5,6 +5,7 @@ import {
   listRooms,
   editRoom,
   deleteRooms,
+  getRoomSchedule,
 } from '../controllers/roomController';
 import { authenticateToken } from '../middlewares/authMiddleware';
 
@@ -14,5 +15,5 @@ router.post('/room',authenticateToken, createRoom);
 router.get('/rooms',authenticateToken, listRooms);
 router.put('/room/:id',authenticateToken, editRoom);
 router.post('/rooms/delete',authenticateToken, deleteRooms);
-
+router.get('/room/:roomId/Schedule', getRoomSchedule)
 export default router;
