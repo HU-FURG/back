@@ -80,8 +80,7 @@ export async function listScheduling(req: Request, res: Response) {
           select: {
             id: true,
             number: true,
-            description: true,
-            bloco: true,
+            ala: true,
             tipo: true,
           },
         },

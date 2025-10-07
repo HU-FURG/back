@@ -14,10 +14,11 @@ CREATE TABLE "public"."User" (
 CREATE TABLE "public"."Room" (
     "id" SERIAL NOT NULL,
     "number" TEXT NOT NULL,
-    "description" TEXT,
-    "bloco" TEXT NOT NULL,
-    "tipo" TEXT,
+    "ala" TEXT NOT NULL,
+    "tipo" TEXT NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Room_pkey" PRIMARY KEY ("id")
 );
@@ -32,21 +33,52 @@ CREATE TABLE "public"."RoomPeriod" (
     "nome" TEXT NOT NULL,
     "isRecurring" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "RoomPeriod_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
+CREATE TABLE "public"."RoomScheduleTemplate" (
+    "id" SERIAL NOT NULL,
+    "userId" INTEGER,
+    "nome" TEXT NOT NULL,
+    "durationInMinutes" INTEGER NOT NULL,
+    "roomNumber" TEXT NOT NULL,
+    "roomAla" TEXT NOT NULL,
+    "originalStart" TIMESTAMP(3) NOT NULL,
+    "originalEnd" TIMESTAMP(3) NOT NULL,
+    "reason" TEXT NOT NULL,
+    "archivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RoomScheduleTemplate_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "public"."PeriodHistory" (
     "id" SERIAL NOT NULL,
-    "roomId" INTEGER NOT NULL,
-    "userId" INTEGER,
+    "roomNumber" TEXT NOT NULL,
+    "roomAla" TEXT NOT NULL,
+    "userName" TEXT,
     "start" TIMESTAMP(3) NOT NULL,
     "end" TIMESTAMP(3) NOT NULL,
     "nome" TEXT NOT NULL,
     "archivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PeriodHistory_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."Notification" (
+    "id" SERIAL NOT NULL,
+    "userId" INTEGER NOT NULL,
+    "message" TEXT NOT NULL,
+    "isRead" BOOLEAN NOT NULL DEFAULT false,
+    "type" TEXT NOT NULL,
+    "relatedRoomId" INTEGER,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Notification_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -65,7 +97,7 @@ ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIG
 ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."PeriodHistory" ADD CONSTRAINT "PeriodHistory_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "public"."Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "public"."RoomScheduleTemplate" ADD CONSTRAINT "RoomScheduleTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."PeriodHistory" ADD CONSTRAINT "PeriodHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "public"."Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

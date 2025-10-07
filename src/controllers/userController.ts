@@ -102,13 +102,13 @@ const createUserSchema = z.object({
 
 export async function createUser(req: Request, res: Response) {
   try {
-    console.log("👤 Criando usuário:", req.body);
+    console.log(" Criando usuário:", req.body);
 
     const { login, senha, cargo } = createUserSchema.parse(req.body);
 
     const exists = await prisma.user.findUnique({ where: { login } });
     if (exists) {
-      console.warn("⚠️ Usuário já existe:", login);
+      console.warn(" Usuário já existe:", login);
       return res.status(400).json({ error: "Usuário já existe" });
     }
 

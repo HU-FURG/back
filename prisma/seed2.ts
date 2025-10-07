@@ -3,21 +3,21 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 // Lista de blocos possíveis
-const blocos = ["Bloco A",
-    "Bloco B",
-    "Bloco C",
-    "Bloco D"];
+const blocos = ["A",
+    "B",
+    "C",
+    "D"];
 
 function getRandomBloco() {
   return blocos[Math.floor(Math.random() * blocos.length)];
 }
 
 function getRandomTipo() {
-  const tipos = [    "Comum",
-    "Reunião",
-    "Estrutura Especfica1",
-    "Estrutura Especfica2",
-    "Estrutura Especfica3"];
+  const tipos = [    "Geral",
+    "Pediatria",
+    "Oftalmologia",
+    "Ginecologia",
+    "Cardiologia"];
   return tipos[Math.floor(Math.random() * tipos.length)];
 }
 
@@ -32,9 +32,8 @@ async function main() {
     const bloco = getRandomBloco()
     salasData.push({
       number: numero.toString(),
-      bloco: bloco,
+      ala: bloco,
       tipo: getRandomTipo(),
-      description: `Sala ${numero} do bloco ${bloco}`,
       active: true,
     });
   }

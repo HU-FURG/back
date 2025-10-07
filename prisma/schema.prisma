@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
@@ -9,58 +9,93 @@ datasource db {
 }
 
 model User {
-  id          Int      @id @default(autoincrement())
-  login       String   @unique
-  senha       String
-  hierarquia  String    
-  lastLogin_at DateTime?
-  createdAt   DateTime @default(now())
+  id              Int             @id @default(autoincrement())
+  login           String          @unique
+  senha           String
+  hierarquia      String
+  lastLogin_at    DateTime?
+  createdAt       DateTime        @default(now())
 
-  roomPeriods RoomPeriod[]
-  histories   PeriodHistory[]
+  roomPeriods           RoomPeriod[]
+  scheduleTemplates     RoomScheduleTemplate[]
+  notificationsReceived Notification[]
 }
 
 model Room {
-  id          Int           @id @default(autoincrement())
-  number      String        
-  description String?
-  bloco       String
-  tipo        String?
-  active      Boolean       @default(true)
-  createdAt   DateTime      @default(now())
-  updatedAt    DateTime     @updatedAt
+  id        Int      @id @default(autoincrement())
+  number    String
+  ala       String   
+  tipo      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  periods     RoomPeriod[]
-  history     PeriodHistory[]
+  periods RoomPeriod[]
 }
 
 model RoomPeriod {
-  id          Int      @id @default(autoincrement())
-  roomId      Int
-  userId      Int?     
-  start       DateTime 
-  end         DateTime   
-  nome        String   
-  isRecurring Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt    DateTime      @updatedAt
+  id            Int      @id @default(autoincrement())
+  roomId        Int
+  userId        Int?
+  start         DateTime
+  end           DateTime
+  nome          String
+  isRecurring   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  room        Room     @relation(fields: [roomId], references: [id])
-  user        User?    @relation(fields: [userId], references: [id])
+  room Room @relation(fields: [roomId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
 
   @@index([roomId, start])
   @@index([roomId, end])
 }
 
-model PeriodHistory {
-  id         Int      @id @default(autoincrement())
-  roomId     Int
-  userId     Int?
-  start      DateTime 
-  end        DateTime 
-  nome       String
-  archivedAt DateTime @default(now())
+// --- Novo Sistema de Templates/Reagendamento ---
+// Este modelo armazena agendamentos que podem ser re-agendados.
+// Um agendamento é movido para cá quando vence ou é cancelado.
+model RoomScheduleTemplate {
+  id              Int      @id @default(autoincrement())
+  userId          Int? 
+  nome            String
+  durationInMinutes Int      // Armazena a duração do agendamento original para facilitar o reagendamento
+  // Detalhes da Sala (para caso a sala seja excluída)
+  roomNumber      String
+  roomAla         String   
+  // Detalhes da Ação
+  originalStart   DateTime // Início original (para referência)
+  originalEnd     DateTime // Fim original (para referência)
+  reason          String   // Motivo da template (e.g., "Vencido", "Cancelado")
+  archivedAt      DateTime @default(now()) 
 
-  room       Room     @relation(fields: [roomId], references: [id])
-  user       User?    @relation(fields: [userId], references: [id])
+  user User? @relation(fields: [userId], references: [id])
+}
+
+// --- Histórico para Análises Individuais ---
+model PeriodHistory {
+  id              Int      @id @default(autoincrement())
+  // Detalhe da sala 
+  roomNumber      String
+  roomAla         String   
+  // Detalhe do nome
+  userName        String?  
+  // Detalhes do Período
+  start           DateTime
+  end             DateTime
+  nome            String
+  archivedAt      DateTime @default(now())
+}
+
+// --- Novo Sistema de Notificação ---
+// Para avisar o cliente sobre o status de um agendamento.
+model Notification {
+  id            Int       @id @default(autoincrement())
+  userId        Int       // Para quem é a notificação
+  message       String    // A mensagem da notificação (e.g., "Seu agendamento na Sala X acabou.")
+  isRead        Boolean   @default(false)
+  type          String    // Tipo (e.g., "FIM_AGENDAMENTO", "CANCELAMENTO", "REAGENDAMENTO_SUCESSO")
+  relatedRoomId Int?      // Opcional: ID da sala relacionada
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
 }

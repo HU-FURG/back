@@ -13,7 +13,7 @@ const router = Router();
 
 router.post('/room',authenticateToken, createRoom);
 router.get('/rooms',authenticateToken, listRooms);
-router.put('/room/:id',authenticateToken, editRoom);
-router.post('/rooms/delete',authenticateToken, deleteRooms);
+router.patch('/room/:id', editRoom);
+router.delete('/room', deleteRooms);
 router.get('/room/:roomId/Schedule', getRoomSchedule)
 export default router;
