@@ -1,0 +1,61 @@
+BLOCO,ÁREA,AMBIENTE,TIPO,BANHEIRO,ESPECIALIDADE,ID_Ambiente
+Ala Azul,"12,7",Consultório,Indiferenciado,SIM,CID,H02-D-170
+Ala Azul,"9,94",Consultório,Indiferenciado,SIM,CID,H02-D-180
+Ala Azul,"10,1",Consultório,Indiferenciado,SIM,CID,H02-D-190
+Ala Azul,"10,01",Consultório,Indiferenciado,NÃO,CID,H02-D-200
+Ala Azul,"15,86",Consultório,Indiferenciado,NÃO,CID,H02-D-210
+Ala Azul,"12,13",Consultório,Indiferenciado,NÃO,CID,H02-D-220
+Ala Azul,"16,03",Consultório,Indiferenciado,NÃO,CID,H02-D-240
+Ala Azul,"8,71",Consultório,Indiferenciado,NÃO,CID,H02-D-410
+Ala Azul,"16,67",Consultório,Indiferenciado,SIM,CID,H02-D-480
+Ala Azul,"12,2",Consultório,Indiferenciado,SIM,CID,H02-D-520
+Ala Azul,"16,41",Consultório,Diferenciado,NÃO,Odontologia,H02-D-450
+Ala Azul,"16,67",Consultório,Indiferenciado,SIM,Oftalmologia,H02-D-260
+Ala Azul,"16,67",Consultório,Indiferenciado,SIM,Oftalmologia,H02-D-270
+Ala Verde,"8,12",Consultório,Indiferenciado,NÃO,Cirurgia,H02-B-470
+Ala Verde,"8,27",Consultório,Diferenciado,SIM,Cirurgia,H02-B-471
+Ala Verde,"6,96",Consultório,Indiferenciado,NÃO,Cirurgia,H02-B-480
+Ala Verde,"9,62",Consultório,Indiferenciado,NÃO,Cirurgia,H02-B-500
+Ala Verde,"8,12",Consultório,Indiferenciado,NÃO,Cirurgia,H02-B-510
+Ala Verde,"8,27",Consultório,Indiferenciado,NÃO,Cirurgia,H02-B-520
+Ala Verde,"12,47",Consultório,Indiferenciado,SIM,Gastroenterologia,H02-B-170
+Ala Verde,"12,6",Consultório,Indiferenciado,NÃO,Gastroenterologia,H02-B-310
+Ala Verde,"13,54",Consultório,Indiferenciado,SIM,Gastroenterologia,H02-B-440
+Ala Verde,"16,67",Consultório,Indiferenciado,SIM,Gastroenterologia,H02-B-450
+Ala Verde,"8,42",Consultório,Indiferenciado,SIM,Pneumologia,H02-B-200
+Ala Verde,"8,42",Consultório,Indiferenciado,SIM,Pneumologia,H02-B-210
+Ala Verde,"8,42",Consultório,Indiferenciado,SIM,Pneumologia,H02-B-220
+Ala Verde,"8,42",Consultório,Indiferenciado,SIM,Pneumologia,H02-B-230
+Ala Verde,"8,42",Consultório,Indiferenciado,SIM,Pneumologia,H02-B-240
+Ambulatório Central,"11,18",Consultório,Indiferenciado,NÃO,?,B01-T-030
+Ambulatório Central,"11,71",Consultório,Diferenciado,SIM,Urologia,B01-T-040
+Ambulatório Central,"9,05",Consultório ,Diferenciado,SIM,Urologia,B01-T-050
+Ambulatório Central,"10,47",Consultório,Indiferenciado,NÃO,Oncologia,B01-T-060
+Ambulatório Central,"8,99",Consultório,Indiferenciado,NÃO,Oncologia,B01-T-080
+Ambulatório Central,"9,66",Consultório,Indiferenciado,NÃO,Neurologia,B01-T-090
+Ambulatório Central,"12,04",Consultório,Indiferenciado,NÃO,Nefrologia,B01-T-100
+Ambulatório Central,"9,59",Consultório,Indiferenciado,NÃO,Clínico,B01-T-110
+Ambulatório Central,"11,05",Consultório,Diferenciado,NÃO,Otorrino,B01-T-120
+Ambulatório Central,"8,61",Consultório,Indiferenciado,NÃO,Hematologia,B01-T-130
+Ambulatório Central,"13,01",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-240
+Ambulatório Central,"9,92",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-250
+Ambulatório Central,"11,71",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-260
+Ambulatório Central,"9,65",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-270
+Ambulatório Central,"10,13",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-280
+Ambulatório Central,"9,37",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-290
+Ambulatório Central,"10,16",Consultório ,Indiferenciado,NÃO,Pediatria,B01-T-300
+Ambulatório de Ginecologia,"12,11",Consultório,Diferenciado,SIM,Ginecologia,H03-D-150
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-160
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-170
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-180
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-190
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-320
+Ambulatório de Ginecologia,"16,67",Consultório,Diferenciado,SIM,Ginecologia,H03-D-330
+Ambulatório de Traumatologia,"12,54",Consultório,Indiferenciado,NÃO,Traumatologia,H01-N-210
+Ambulatório de Traumatologia,"9,31",Consultório,Indiferenciado,NÃO,Traumatologia,H01-N-280
+SAE Infectologia,"11,43",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-080
+SAE Infectologia,"14,77",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-090
+SAE Infectologia,"15,3",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-190
+SAE Infectologia,"13,2",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-210
+SAE Infectologia,"13,92",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-230
+SAE Infectologia,"13,91",Consultório,Indiferenciado,NÃO,Infectologia,P02-A-260

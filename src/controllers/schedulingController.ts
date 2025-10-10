@@ -1,4 +1,3 @@
-// src/controllers/roomPeriodController.ts
 import { Request, Response } from "express";
 import { prisma } from "../prisma/client";
 import { z } from "zod";
@@ -29,33 +28,28 @@ export async function listScheduling(req: Request, res: Response) {
 
   try {
     const { page, bloco, number, tipo, dateStart, dateEnd } = schema.parse(req.query);
-    console.log(req.query)
     const pageSize = 12;
     const currentPage = parseInt(page || "1", 10);
     const skip = (currentPage - 1) * pageSize;
 
     const agora = new Date();
 
-    // Filtros principais
+    // Filtrar por datas
     const filters: any = {};
-
     if (dateStart) {
-      // Filtra todas reservas do dia selecionado
       const startOfDay = new Date(dateStart + "T00:00:00");
-      const endOfDay = dateEnd? new Date(dateEnd + "T23:59:59") : new Date(dateStart + "T23:59:59")
+      const endOfDay = dateEnd ? new Date(dateEnd + "T23:59:59") : new Date(dateStart + "T23:59:59");
       filters.start = { gte: startOfDay, lte: endOfDay };
     } else {
-      // Sem data: apenas reservas do dia
       const startOfToday = new Date(agora.toISOString().split("T")[0] + "T00:00:00");
       const endOfToday = new Date(agora.toISOString().split("T")[0] + "T23:59:59");
-
       filters.start = { gte: startOfToday, lte: endOfToday };
     }
 
     // Filtros de sala
     const roomFilters: any = {};
     if (bloco) roomFilters.bloco = { contains: bloco, mode: "insensitive" };
-    if (number) roomFilters.number = { contains: number, mode: "insensitive" };
+    if (number) roomFilters.ID_Ambiente = { contains: number, mode: "insensitive" };
     if (tipo) roomFilters.tipo = { contains: tipo, mode: "insensitive" };
 
     const total = await prisma.roomPeriod.count({
@@ -79,8 +73,8 @@ export async function listScheduling(req: Request, res: Response) {
         room: {
           select: {
             id: true,
-            number: true,
-            ala: true,
+            ID_Ambiente: true,
+            bloco: true,
             tipo: true,
           },
         },
@@ -108,7 +102,6 @@ export async function listScheduling(req: Request, res: Response) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
-
 
 // Cancelar agendamento
 export async function deleteScheduling(req: Request, res: Response) {

@@ -13,9 +13,13 @@ CREATE TABLE "public"."User" (
 -- CreateTable
 CREATE TABLE "public"."Room" (
     "id" SERIAL NOT NULL,
-    "number" TEXT NOT NULL,
-    "ala" TEXT NOT NULL,
+    "ID_Ambiente" TEXT NOT NULL,
+    "bloco" TEXT NOT NULL,
+    "especialidade" TEXT NOT NULL,
     "tipo" TEXT NOT NULL,
+    "banheiro" BOOLEAN NOT NULL,
+    "ambiente" TEXT NOT NULL,
+    "area" DOUBLE PRECISION NOT NULL,
     "active" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -44,7 +48,7 @@ CREATE TABLE "public"."RoomScheduleTemplate" (
     "userId" INTEGER,
     "nome" TEXT NOT NULL,
     "durationInMinutes" INTEGER NOT NULL,
-    "roomNumber" TEXT NOT NULL,
+    "roomIdAmbiente" TEXT NOT NULL,
     "roomAla" TEXT NOT NULL,
     "originalStart" TIMESTAMP(3) NOT NULL,
     "originalEnd" TIMESTAMP(3) NOT NULL,
@@ -57,7 +61,7 @@ CREATE TABLE "public"."RoomScheduleTemplate" (
 -- CreateTable
 CREATE TABLE "public"."PeriodHistory" (
     "id" SERIAL NOT NULL,
-    "roomNumber" TEXT NOT NULL,
+    "roomIdAmbiente" TEXT NOT NULL,
     "roomAla" TEXT NOT NULL,
     "userName" TEXT,
     "start" TIMESTAMP(3) NOT NULL,
@@ -83,6 +87,9 @@ CREATE TABLE "public"."Notification" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_login_key" ON "public"."User"("login");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Room_ID_Ambiente_key" ON "public"."Room"("ID_Ambiente");
 
 -- CreateIndex
 CREATE INDEX "RoomPeriod_roomId_start_idx" ON "public"."RoomPeriod"("roomId", "start");
