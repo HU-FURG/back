@@ -1,4 +1,6 @@
 import { prisma } from "./client";
+import { Prisma } from "@prisma/client";
+const templateData: Prisma.RoomScheduleTemplateCreateManyInput[] = [];
 
 // Função utilitária para calcular a diferença em minutos entre duas datas
 function durationInMinutes(start: Date, end: Date): number {
@@ -8,12 +10,14 @@ function durationInMinutes(start: Date, end: Date): number {
 
 export const clearPeriodsandUpdate = async () => {
     const agora = new Date();
+    // 💡 Otimização: Calcular o offset de 7 dias uma vez.
+    const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000; 
 
     try {
         await prisma.$transaction(async (tx) => {
             
             // 1. BUSCA POR TODOS OS PERÍODOS EXPIRADOS
-            // Usa 'end' para garantir que o agendamento já terminou.
+            // Garante que os campos ID_Ambiente e bloco (Room) e login (User) estão inclusos.
             const expiredPeriods = await tx.roomPeriod.findMany({
                 where: {
                     end: { lt: agora }, // Filtra onde o FIM é menor que a hora atual
@@ -21,13 +25,13 @@ export const clearPeriodsandUpdate = async () => {
                 include: {
                     room: {
                         select: {
-                            number: true,
-                            ala: true,
+                            ID_Ambiente: true, // Corresponde ao campo do modelo Room
+                            bloco: true,      // Corresponde ao campo do modelo Room
                         },
                     },
                     user: {
                         select: {
-                            login: true,
+                            login: true,      // Corresponde ao campo do modelo User
                         },
                     },
                 },
@@ -42,22 +46,23 @@ export const clearPeriodsandUpdate = async () => {
             const nonRecurrentToDeleteIds: number[] = [];
 
             // Arrays para operações bulk
-            const historyData = [];
-            const templateData = [];
+            const historyData: any[] = []; // Usamos 'any' temporariamente para evitar erros complexos do TS/Prisma
+            // Tipagem explícita para o Template (opcional, mas bom para clareza)
 
             for (const period of expiredPeriods) {
-                const roomNumber = period.room.number;
-                const roomAla = period.room.ala;
+                const roomIdAmbiente = period.room.ID_Ambiente; // Usamos o nome do campo do Room
+                const roomBloco = period.room.bloco;             // Usamos o nome do campo do Room
                 const userName = period.user?.login;
                 const duration = durationInMinutes(period.start, period.end);
 
                 // --- 2. PREPARAR DADOS PARA ARQUIVO E TEMPLATE ---
                 
                 // 2a. Dados para Histórico (PeriodHistory)
+                // ✅ CORREÇÃO: Alinhar as chaves (Keys) com o modelo PeriodHistory (roomIdAmbiente, roomBloco)
                 historyData.push({
-                    roomNumber: roomNumber,
-                    roomAla: roomAla,
-                    userName: userName ?? "Usuário Deletado/Não Registrado",
+                    roomIdAmbiente: roomIdAmbiente, // Nome de campo do PeriodHistory
+                    roomBloco: roomBloco,           // Nome de campo do PeriodHistory
+                    userName: userName ?? "Usuário Deletado/Não Registrado", // userName aceita 'null' no schema, mas String? no objeto
                     start: period.start,
                     end: period.end,
                     nome: period.nome,
@@ -65,12 +70,13 @@ export const clearPeriodsandUpdate = async () => {
                 });
 
                 // 2b. Dados para Template de Re-agendamento (RoomScheduleTemplate)
+                // ✅ CORREÇÃO: Alinhar as chaves com o modelo RoomScheduleTemplate
                 templateData.push({
-                    userId: period.userId,
+                    userId: period.userId,          // userId é Int? (number | null) no schema
                     nome: period.nome,
                     durationInMinutes: duration,
-                    roomNumber: roomNumber,
-                    roomAla: roomAla,
+                    roomIdAmbiente: roomIdAmbiente, // Nome de campo do RoomScheduleTemplate
+                    roomBloco: roomBloco,           // Nome de campo do RoomScheduleTemplate
                     originalStart: period.start,
                     originalEnd: period.end,
                     reason: "Vencido", 
@@ -90,17 +96,15 @@ export const clearPeriodsandUpdate = async () => {
 
             // 4a. Criar Histórico (PeriodHistory)
             if (historyData.length > 0) {
+                // ✅ CORREÇÃO: Removendo o cast 'as any' se as chaves estiverem corretas (ver 2a)
                 await tx.periodHistory.createMany({ data: historyData });
             }
 
             // 4b. Criar Templates de Re-agendamento (RoomScheduleTemplate)
-            // Filtramos templatesData para remover userId nulo caso o Prisma exija
-            const validTemplateData = templateData.map(t => ({
-                ...t,
-                userId: t.userId ?? undefined, // Se userId for Int?, deve ser number ou undefined
-            }));
-            if (validTemplateData.length > 0) {
-                 await tx.roomScheduleTemplate.createMany({ data: validTemplateData as any }); // Uso de 'as any' para lidar com tipos complexos
+            if (templateData.length > 0) {
+                // ✅ CORREÇÃO: Removendo o mapeamento 'validTemplateData' e o 'as any'.
+                // O templateData já tem o tipo correto com userId: number | null.
+                await tx.roomScheduleTemplate.createMany({ data: templateData }); 
             }
 
 
@@ -113,12 +117,9 @@ export const clearPeriodsandUpdate = async () => {
 
             // 4d. Atualizar Períodos Recorrentes (Próxima Semana)
             for (const period of recurrentToUpdate) {
-                const novaStart = new Date(period.start);
-                const novaEnd = new Date(period.end);
-
-                // Avança exatamente 7 dias (próxima semana)
-                novaStart.setDate(novaStart.getDate() + 7);
-                novaEnd.setDate(novaEnd.getDate() + 7);
+                // ✅ Otimização: Usando o offset calculado em milissegundos
+                const novaStart = new Date(period.start.getTime() + sevenDaysInMs);
+                const novaEnd = new Date(period.end.getTime() + sevenDaysInMs);
 
                 await tx.roomPeriod.update({
                     where: { id: period.id },
@@ -128,7 +129,7 @@ export const clearPeriodsandUpdate = async () => {
                     },
                 });
             }
-          console.log(`[✅] Processamento concluído. Períodos arquivados: ${expiredPeriods.length }.`);
+          console.log(`[✅] Processamento concluído. Períodos arquivados: ${expiredPeriods.length}.`);
         });
 
     } catch (error) {

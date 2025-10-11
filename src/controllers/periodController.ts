@@ -108,9 +108,9 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     return res.status(200).json(
       salasDisponiveis.map(sala => ({
         id: sala.id,
-        nome: sala.number,
+        nome: sala.ID_Ambiente,
         tipo: sala.tipo ?? '',
-        ala: sala.ala,
+        ala: sala.bloco,
         status: sala.active ? 'active' : 'inactive',
       })),
     );
