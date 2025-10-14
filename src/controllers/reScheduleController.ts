@@ -27,12 +27,7 @@ export async function listReschedule(req: Request, res: Response) {
       const startOfDay = new Date(date + "T00:00:00");
       const endOfDay = new Date(date + "T23:59:59");
       filters.originalStart = { gte: startOfDay, lte: endOfDay };
-    } else {
-      const startOfYesterday = new Date(ontem.toISOString().split("T")[0] + "T00:00:00");
-      const endOfYesterday = new Date(ontem.toISOString().split("T")[0] + "T23:59:59");
-      filters.originalStart = { gte: startOfYesterday, lte: endOfYesterday };
-    }
-
+    } 
     // Filtros de sala aplicados diretamente nos campos de RoomScheduleTemplate
     if (bloco) filters.roomBloco = { contains: bloco, mode: "insensitive" };
     if (number) filters.roomIdAmbiente = { contains: number, mode: "insensitive" };
