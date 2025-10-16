@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { prisma } from "../prisma/client";
 import { z } from "zod";
+import { DateTime } from "luxon"
 
 const agendaSchema = z.object({
   roomId: z.number(),
@@ -159,6 +160,69 @@ export async function updateScheduling(req: Request, res: Response) {
       return res.status(400).json({ errors: error.errors });
     }
     console.error("Erro ao atualizar agendamento:", error);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+}
+
+export async function listCurrentRoomStatus(req: Request, res: Response) {
+  try {
+    const agora = DateTime.now().setZone("America/Sao_Paulo").toJSDate();
+    const ala = req.params.ala
+    console.log(ala)
+    const salas = await prisma.room.findMany({
+      where: { 
+        active: true,
+        bloco: {contains: ala, mode: "insensitive"}
+       },
+      select: {
+        id: true,
+        ID_Ambiente: true,
+        bloco: true,
+        area: true,
+      },
+    });
+
+    const agendamentosAtuais = await prisma.roomPeriod.findMany({
+      where: {
+        start: { lte: agora }, 
+        end: { gte: agora },
+        room: {
+          bloco: {contains: ala, mode: "insensitive"}
+        }
+      },
+      select: {
+        roomId: true,
+        nome: true,
+        user: {
+          select: { login: true },
+        },
+      },
+    });
+
+    const mapaOcupacao = agendamentosAtuais.reduce<Record<number, { nome: string; responsavel?: string }>>(
+      (acc, ag) => {
+        acc[ag.roomId] = {
+          nome: ag.nome,
+          responsavel: ag.user?.login,
+        };
+        return acc;
+      },
+      {}
+    );
+
+    const statusSalas = salas.map((s) => ({
+      id: s.id,
+      number: s.ID_Ambiente,
+      ala: s.bloco,
+      area: s.area,
+      ocupado: !!mapaOcupacao[s.id],
+      responsavel: mapaOcupacao[s.id]?.responsavel ?? null,
+      nome: mapaOcupacao[s.id]?.nome ?? null,
+    }));
+
+    return res.json(statusSalas);
+  } catch (error) {
+    console.error("Erro ao listar status das salas:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }

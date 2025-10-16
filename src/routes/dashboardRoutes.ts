@@ -7,7 +7,7 @@ import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.post('/occupation',authenticateToken,occupation)
+router.get('/occupation',authenticateToken, occupation)
 router.post('/tempoMedio',authenticateToken, calcularTempoMedioUso)
 
 export default router;

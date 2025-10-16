@@ -69,6 +69,10 @@ export async function listRooms(req: Request, res: Response) {
 // ✅ Editar sala
 export async function editRoom(req: Request, res: Response) {
   const schema = z.object({
+    especialidade: z.string().optional(),
+    ala: z.string().optional(),
+    ambiente: z.string().optional(),
+    banheiro: z.boolean().optional(),
     tipo: z.string().optional(),
     active: z.boolean().optional(),
     force: z.boolean().optional(),
@@ -87,7 +91,10 @@ export async function editRoom(req: Request, res: Response) {
 
     const updatePayload = {
       tipo: data.tipo ?? existingRoom.tipo,
-      bloco: (req.body as any).bloco ?? existingRoom.bloco,
+      bloco: data.ala ?? existingRoom.bloco, // "ala" do schema -> "bloco" no banco
+      ambiente: data.ambiente ?? existingRoom.ambiente,
+      especialidade: data.especialidade ?? existingRoom.especialidade,
+      banheiro: data.banheiro ?? existingRoom.banheiro,
       active: data.active ?? existingRoom.active,
     };
 
