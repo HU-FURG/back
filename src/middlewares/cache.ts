@@ -56,6 +56,7 @@ export const checkRoomUpdates = async (req: Request, res: Response, next: NextFu
 
     // 5. Se os dados mudaram, anexamos o novo ETag na resposta
     // e passamos para a rota principal (ex: buscar todas as salas).
+    console.log("ta chegando aqui ?", etag)
     res.setHeader('ETag', etag);
     next(); // Continua para o próximo handler da rota
 
