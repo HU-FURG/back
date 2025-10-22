@@ -115,10 +115,10 @@ export const calcularTempoMedioUso = async (req: Request, res: Response) => {
     const { inicio, fim } = PeriodoSchema.parse(req.body)
 
     const dataInicio = new Date(inicio)
-    dataInicio.setHours(0, 0, 0, 0)
+    dataInicio.setUTCHours(0, 0, 0, 0)
 
     const dataFim = new Date(fim)
-    dataFim.setHours(23,59,0,0)
+    dataFim.setUTCHours(23, 59, 0, 0)
 
     if (dataInicio > dataFim) {
       return res.status(400).json({ message: "Data inicial não pode ser maior que a final." })
@@ -139,7 +139,8 @@ export const calcularTempoMedioUso = async (req: Request, res: Response) => {
       },
       select: { start: true, end: true, roomId: true }
     })
-
+    console.log("Início:", dataInicio.toLocaleString())
+    console.log("Fim:", dataFim.toLocaleString())
     if (periodos.length === 0) {
       return res.status(200).json({ 
         message: "Nenhum agendamento encontrado no período.", 
@@ -148,7 +149,6 @@ export const calcularTempoMedioUso = async (req: Request, res: Response) => {
         totalSalas
       })
     }
-
     // Somar tempos
     const tempos = periodos.map(p => calcularMinutos(p.start, p.end))
     const soma = tempos.reduce((acc, t) => acc + t, 0)
@@ -160,7 +160,7 @@ export const calcularTempoMedioUso = async (req: Request, res: Response) => {
     return res.status(200).json({
       salasUsadas,
       totalSalas,
-      tempoMedio: formatarDuracao(media) // <<< já formatado
+      tempoMedio: formatarDuracao(media)
     })
   } catch (error) {
     console.error("Erro ao calcular tempo médio de uso:", error)

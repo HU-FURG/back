@@ -10,7 +10,8 @@ const HorarioSchema = z.object({
 })
 
 const BodySchema = z.object({
-  horarios: z.array(HorarioSchema)
+  horarios: z.array(HorarioSchema),
+  recorrente: z.boolean()
 })
 
 const AgendamentoSchema = z.object({
@@ -23,7 +24,7 @@ const AgendamentoSchema = z.object({
       horaFim: z.string()     // "HH:mm"
     })
   ),
-  isRecurring: z.boolean()
+  recorrente: z.boolean()
 })
 
 type BuscarSalasBody = z.infer<typeof BodySchema>
@@ -31,92 +32,111 @@ type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
-    const { horarios } = BodySchema.parse(req.body);
+    const { horarios, recorrente } = BodySchema.parse(req.body);
 
-    // Obter todas as salas ativas com seus agendamentos
     const salasAtivas = await prisma.room.findMany({
       where: { active: true },
       include: { periods: true },
     });
 
-    const salasDisponiveis = salasAtivas.filter(sala => {
-      return horarios.every(horario => {
+    const salasDisponiveis = salasAtivas.filter((sala) => {
+      return horarios.every((horario) => {
         const inicioReq = new Date(`${horario.data}T${horario.horaInicio}:00`);
         const fimReq = new Date(`${horario.data}T${horario.horaFim}:00`);
-        
-        // Obtém o dia da semana da requisição
-        const diaDaSemanaReq = inicioReq.getDay(); 
+        const diaDaSemanaReq = inicioReq.getDay();
 
-        const temConflito = sala.periods.some(period => {
+        const temConflito = sala.periods.some((period) => {
           const start = new Date(period.start);
           const end = new Date(period.end);
-          
-          // -----------------------------------------------------------
-          // LÓGICA DE RECORRÊNCIA PERMANENTE
-          // -----------------------------------------------------------
-          if (period.isRecurring) {
-            
-            // 1. Verifica se a reserva solicitada é anterior à data de início da recorrência.
-            // (Assumimos que 'start' é a data em que a recorrência começou)
-            if (inicioReq < start) {
-                return false; // Recorrência ainda não estava ativa.
+          const diaDaSemanaPeriodo = start.getDay();
+
+          // --------------------------------------------
+          // CASO 1: Reserva da requisição é RECORRENTE
+          // --------------------------------------------
+          if (recorrente) {
+            if (period.isRecurring) {
+              // Mesmo dia da semana e sobreposição de horário
+              const mesmoDiaSemana = diaDaSemanaReq === diaDaSemanaPeriodo;
+
+              if (!mesmoDiaSemana) return false;
+
+              // Verifica sobreposição de horas (comparando somente hora/minuto)
+              const conflitoHorario =
+                !(
+                  fimReq.getHours() < start.getHours() ||
+                  (fimReq.getHours() === start.getHours() &&
+                    fimReq.getMinutes() <= start.getMinutes()) ||
+                  inicioReq.getHours() > end.getHours() ||
+                  (inicioReq.getHours() === end.getHours() &&
+                    inicioReq.getMinutes() >= end.getMinutes())
+                );
+
+              return conflitoHorario;
+            } else {
+              // Comparar com reservas pontuais (no futuro)
+              const isFuture = start >= new Date(); // reserva futura
+              if (!isFuture) return false;
+
+              // Mesmo dia da semana?
+              const mesmoDiaSemana = diaDaSemanaReq === diaDaSemanaPeriodo;
+              if (!mesmoDiaSemana) return false;
+
+              // Verifica sobreposição de horas
+              const conflitoHorario =
+                !(
+                  fimReq <= start ||
+                  inicioReq >= end
+                );
+
+              return conflitoHorario;
             }
-
-            // 2. Compara o dia da semana.
-            const diaDaSemanaPeriodo = start.getDay(); 
-            
-            if (diaDaSemanaReq !== diaDaSemanaPeriodo) {
-                return false; 
-            }
-
-            // 3. Verifica sobreposição de HORÁRIO (Ignorando a Data).
-            // Criamos 'Dates temporários' com o tempo do período recorrente, mas na data da requisição.
-            
-            const startRecorrenteNaDataReq = new Date(inicioReq);
-            startRecorrenteNaDataReq.setHours(start.getHours(), start.getMinutes(), 0, 0);
-
-            const endRecorrenteNaDataReq = new Date(inicioReq);
-            endRecorrenteNaDataReq.setHours(end.getHours(), end.getMinutes(), 0, 0);
-
-            //  checar a sobreposição de tempo na mesma data:
-            const isOverlappingTime = !(
-                fimReq <= startRecorrenteNaDataReq || 
-                inicioReq >= endRecorrenteNaDataReq
-            );
-            
-            return isOverlappingTime; 
           }
-          
-          // -----------------------------------------------------------
-          // LÓGICA PARA RESERVAS PONTUAIS
-          // -----------------------------------------------------------
-          
-          // Verifica se a DATA COMPLETA coincide
-          const isSameDay = start.toDateString() === inicioReq.toDateString();
 
-          // Verifica se o HORÁRIO coincide
-          const isOverlappingTime = !(fimReq <= start || inicioReq >= end);
-          
-          return isSameDay && isOverlappingTime;
+          // --------------------------------------------
+          // CASO 2: Reserva da requisição é PONTUAL
+          // --------------------------------------------
+          else {
+            if (period.isRecurring) {
+              // Se o recorrente ainda não começou, ignora
+              if (inicioReq < start) return false;
+
+              // Mesmo dia da semana?
+              if (diaDaSemanaReq !== diaDaSemanaPeriodo) return false;
+
+              // Verifica sobreposição de horários
+              const startRecorrenteNaDataReq = new Date(inicioReq);
+              startRecorrenteNaDataReq.setHours(start.getHours(), start.getMinutes(), 0, 0);
+
+              const endRecorrenteNaDataReq = new Date(inicioReq);
+              endRecorrenteNaDataReq.setHours(end.getHours(), end.getMinutes(), 0, 0);
+
+              const conflitoHorario =
+                !(
+                  fimReq <= startRecorrenteNaDataReq ||
+                  inicioReq >= endRecorrenteNaDataReq
+                );
+
+              return conflitoHorario;
+            }
+          }
         });
 
         return !temConflito;
       });
     });
 
-    // ... (restante da função)
     return res.status(200).json(
-      salasDisponiveis.map(sala => ({
+      salasDisponiveis.map((sala) => ({
         id: sala.id,
         nome: sala.ID_Ambiente,
-        tipo: sala.tipo ?? '',
+        tipo: sala.tipo ?? "",
         ala: sala.bloco,
-        status: sala.active ? 'active' : 'inactive',
-      })),
+        status: sala.active ? "active" : "inactive",
+      }))
     );
   } catch (error) {
     console.error(error);
-    return res.status(400).json({ message: 'Erro ao buscar salas disponíveis.' });
+    return res.status(400).json({ message: "Erro ao buscar salas disponíveis." });
   }
 };
 
@@ -125,14 +145,14 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
 // ----------------------
 export const agendarSala = async (req: Request, res: Response) => {
   try {
-    const { salaId, responsavel, horarios, isRecurring } = AgendamentoSchema.parse(req.body)
+    const { salaId, responsavel, horarios, recorrente } = AgendamentoSchema.parse(req.body)
 
     const registros = horarios.map(({ data, horaInicio, horaFim }) => ({
       roomId: salaId,
       start: new Date(`${data}T${horaInicio}:00`),
       end: new Date(`${data}T${horaFim}:00`),
       nome: responsavel,
-      isRecurring: isRecurring,
+      isRecurring: recorrente,
       createdAt: new Date()
     }))
 
