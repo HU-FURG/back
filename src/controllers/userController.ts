@@ -19,8 +19,9 @@ export async function login(req: Request, res: Response) {
     const { login, senha, remember } = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({
-      where: { login },
+      where: { login, active: true },
     });
+
     console.log(" Usuário encontrado no banco:", user);
 
     if (!user) {
@@ -40,6 +41,7 @@ export async function login(req: Request, res: Response) {
       where: { id: user.id },
       data: { lastLogin_at: new Date() },
     });
+
     console.log("📅 Atualizado lastLogin_at para:", user.login);
 
     const token = jwt.sign(
@@ -57,10 +59,11 @@ export async function login(req: Request, res: Response) {
       sameSite: isProduction ? 'lax' : 'lax', // em produção = Lax (primeira parte), dev pode ser Lax também
       maxAge: remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
     });
+
     const cargo = user.hierarquia;
     console.log("Login bem sucedido:", { login, cargo });
-    return res.status(200).json({ login, cargo });
 
+    return res.status(200).json({ login, cargo });
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error("❌ Erro de validação no login:", error.errors);
@@ -75,7 +78,16 @@ export async function login(req: Request, res: Response) {
 export async function validateToken(req: Request, res: Response) {
   const { login } = (req as any).user;
   console.log("🔐 Token validado para:", login);
-  res.json({ valid: true, login });
+  const data = await prisma.user.findUnique({
+      where: { login, active: true },
+      select: {hierarquia: true}
+    });
+
+  if (!data) {
+    return res.status(403).json({ valid: false });
+  }
+  
+  res.json({ valid: true, login, cargo: data?.hierarquia });
 }
 
 export function logout(req: Request, res: Response) {
@@ -107,18 +119,25 @@ export async function createUser(req: Request, res: Response) {
     const { login, senha, cargo } = createUserSchema.parse(req.body);
 
     const exists = await prisma.user.findUnique({ where: { login } });
+
     if (exists) {
       console.warn(" Usuário já existe:", login);
       return res.status(400).json({ error: "Usuário já existe" });
     }
 
     const hashedPassword = await bcrypt.hash(senha, 10);
+    
+    if (!cargo || !["user", "admin", ""].includes(cargo)) {
+      return res.status(400).json({ error: "Cargo não existe" });
+    }
+
     const newUser = await prisma.user.create({
       data: { login, senha: hashedPassword, hierarquia: cargo || "user" },
     });
 
     console.log("✅ Usuário criado:", newUser);
     res.status(201).json({ login: newUser.login, cargo: newUser.hierarquia });
+
   } catch (err) {
     console.error("❌ Erro ao criar usuário:", err);
     res.status(500).json({ error: "Erro interno" });
@@ -127,7 +146,7 @@ export async function createUser(req: Request, res: Response) {
 
 export async function removeUser(req: Request, res: Response) {
   try {
-    console.log("🗑️ Removendo usuário:", req.body);
+    console.log("Removendo usuário:", req.body);
 
     const { login } = z.object({ login: z.string() }).parse(req.body);
 
@@ -137,7 +156,7 @@ export async function removeUser(req: Request, res: Response) {
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
-    await prisma.user.delete({ where: { login } });
+    await prisma.user.update({ where: { login }, data: {active: false} });
     console.log("✅ Usuário removido:", login);
 
     res.json({ success: true, login });
@@ -153,7 +172,7 @@ export async function getUsers(req: Request, res: Response) {
 
     const users = await prisma.user.findMany({
       where: { hierarquia: { not: "admin" } },
-      select: { login: true, hierarquia: true, lastLogin_at: true },
+      select: { login: true, hierarquia: true, lastLogin_at: true, active: true },
     });
 
     console.log("✅ Usuários encontrados:", users);
@@ -187,6 +206,7 @@ export async function loginAnonimo(req: Request, res: Response) {
       where: { id: user.id },
       data: { lastLogin_at: new Date() },
     });
+    
     console.log("📅 Atualizado lastLogin_at para anonimo");
 
     const token = jwt.sign(
@@ -204,7 +224,11 @@ export async function loginAnonimo(req: Request, res: Response) {
     });
 
     console.log("🎉 Logou como anonimo");
-    return res.status(200).json({ login: user.login, cargo: user.hierarquia });
+    const obj = {
+      login: user.login,
+      cargo: user.hierarquia
+    }
+    return res.status(200).json(obj);
   } catch (err) {
     console.error("❌ Erro no login anônimo:", err);
     return res.status(500).json({ error: "Erro interno no login anônimo" });

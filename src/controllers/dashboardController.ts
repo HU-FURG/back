@@ -7,6 +7,7 @@ const PeriodoSchema = z.object({
   inicio: z.string(), // "2025-08-01"
   fim: z.string()     // "2025-08-07"
 })
+
 const diasDaSemana = [
   "Domingo", 
   "Segunda", 
@@ -16,6 +17,7 @@ const diasDaSemana = [
   "Sexta", 
   "Sábado"
 ];
+
 const fusoHorario = "America/Sao_Paulo";
 // ----------------------
 // TAXA DE OCUPAÇÃO
@@ -168,3 +170,283 @@ export const calcularTempoMedioUso = async (req: Request, res: Response) => {
   }
 }
 
+const PeriodoSalaSchema = z.object({
+  inicio: z.string(), // "2024-01-01"
+  fim: z.string(),    // "2024-12-31"
+  roomIdAmbiente: z.string(), // Sala específica
+});
+const HORARIO_INICIO = 8; // 08:00
+const HORARIO_FIM = 19;   // 19:00
+
+export const tempoMedioUsoDiarioPeriodo = async (req: Request, res: Response) => {
+  try {
+    const { inicio, fim, roomIdAmbiente } = PeriodoSalaSchema.parse(req.body);
+
+    let dtInicio = DateTime.fromISO(inicio, { zone: fusoHorario }).startOf("day");
+    const dtFim = DateTime.fromISO(fim, { zone: fusoHorario }).endOf("day");
+
+    // Buscar todos os agendamentos da sala no período
+    const agendamentos = await prisma.periodHistory.findMany({
+      where: {
+        roomIdAmbiente: roomIdAmbiente, 
+        used: true,
+        start: { lte: dtFim.toJSDate() },
+        end: { gte: dtInicio.toJSDate() },
+      },
+      select: { startService: true, endService: true },
+    });
+
+
+    const dias: {
+      dia: string;
+      tempoPossivel: number;
+      tempoUsado: number;
+    }[] = [];
+
+    while (dtInicio <= dtFim) {
+      // Ignora fins de semana
+      if (dtInicio.weekday <= 5) {
+        const inicioDia = dtInicio.set({ hour: HORARIO_INICIO, minute: 0, second: 0 });
+        const fimDia = dtInicio.set({ hour: HORARIO_FIM, minute: 0, second: 0 });
+
+        const tempoPossivel = fimDia.diff(inicioDia, "minutes").minutes;
+
+        let tempoUsado = 0;
+
+        for (const ag of agendamentos) {
+          if (!ag.startService || !ag.endService) continue;
+
+          const agStart = DateTime.fromJSDate(ag.startService, { zone: fusoHorario });
+          const agEnd = DateTime.fromJSDate(ag.endService, { zone: fusoHorario });
+
+          const start = agStart > inicioDia ? agStart : inicioDia;
+          const end = agEnd < fimDia ? agEnd : fimDia;
+
+          if (end > start) {
+            tempoUsado += end.diff(start, "minutes").minutes;
+          }
+        }
+        dias.push({
+          dia: dtInicio.toISODate() ?? dtInicio.toFormat("yyyy-MM-dd"),
+          tempoPossivel,
+          tempoUsado,
+        });
+      }
+
+      dtInicio = dtInicio.plus({ days: 1 });
+    }
+
+    return res.status(200).json(dias);
+
+  } catch (error) {
+    console.error("Erro ao calcular tempo médio diário do período:", error);
+    return res.status(400).json({ message: "Erro ao calcular tempo médio diário do período." });
+  }
+};
+
+const PeriodoSalaTempoSchema = z.object({
+  data: z.string(),          // Ex: "2025-01-01"
+  fim: z.string(),             // Ex: "2025-03-31"
+  roomIdAmbiente: z.string(),  // ID_Ambiente da sala
+});
+
+// uso { "data": "2025-08", "roomIdAmbiente": "H02-D-170" } or { "data": "2025", "roomIdAmbiente": "H02-D-170" }
+export const tempoPorSalaPeriodo = async (req: Request, res: Response) => {
+  try {
+    const { data, roomIdAmbiente } = PeriodoSalaTempoSchema.parse(req.body);
+
+    // Detecta se veio só o ano ou também o mês
+    let dtInicio: DateTime;
+    let dtFim: DateTime;
+
+    if (/^\d{4}$/.test(data)) {
+      // Caso seja apenas "2025"
+      const ano = parseInt(data, 10);
+      dtInicio = DateTime.fromObject({ year: ano, month: 1, day: 1 }, { zone: fusoHorario }).startOf("day");
+      dtFim = dtInicio.endOf("year");
+    } else if (/^\d{4}-\d{2}$/.test(data)) {
+      // Caso seja "2025-08"
+      const [ano, mes] = data.split("-").map(Number);
+      dtInicio = DateTime.fromObject({ year: ano, month: mes, day: 1 }, { zone: fusoHorario }).startOf("day");
+      dtFim = dtInicio.endOf("month");
+    } else {
+      return res.status(400).json({ message: "Formato de data inválido. Use 'YYYY' ou 'YYYY-MM'." });
+    }
+
+    // Buscar históricos de uso da sala
+    const periodos = await prisma.periodHistory.findMany({
+      where: {
+        roomIdAmbiente,
+        start: { lte: dtFim.toJSDate() },
+        end: { gte: dtInicio.toJSDate() },
+      },
+      select: {
+        start: true,
+        end: true,
+        used: true,
+        startService: true,
+        endService: true,
+        durationMinutes: true,
+        actualDurationMinutes: true,
+      },
+    });
+
+    if (periodos.length === 0) {
+      return res.status(200).json({ message: "Nenhum dado encontrado para esta sala no período.", data: [] });
+    }
+
+    // Agrupar por mês/ano
+    const statsPorMes = new Map<string, { reservado: number; usado: number; count: number }>();
+
+    for (const p of periodos) {
+      const mesRef = DateTime.fromJSDate(p.start).setZone(fusoHorario).toFormat("yyyy-MM");
+      const reservado = p.durationMinutes ?? 0;
+      const usado = p.used ? (p.actualDurationMinutes ?? reservado) : 0;
+
+      if (!statsPorMes.has(mesRef)) {
+        statsPorMes.set(mesRef, { reservado: 0, usado: 0, count: 0 });
+      }
+
+      const m = statsPorMes.get(mesRef)!;
+      m.reservado += reservado;
+      m.usado += usado;
+      m.count++;
+    }
+
+    const resultado = Array.from(statsPorMes.entries()).map(([mesRef, data]) => ({
+      mesRef,
+      tempoReservadoMin: data.reservado,
+      tempoUsadoMin: data.usado,
+      taxaUso: data.reservado > 0 ? Number(((data.usado / data.reservado) * 100).toFixed(2)) : 0,
+      totalAgendamentos: data.count,
+    }));
+
+    return res.status(200).json(resultado);
+  } catch (error) {
+    console.error("Erro ao calcular tempo por sala no período:", error);
+    return res.status(400).json({ message: "Erro ao calcular tempo por sala no período." });
+  }
+};
+
+// ----------------------------------
+// 2️⃣ TEMPO GERAL POR BLOCO (RoomStats)
+// ----------------------------------
+const BlocoPeriodoSchema = z.object({
+  bloco: z.string(),          // Ex: "Ala Azul"
+  mes: z.number().optional(), // 1-12 opcional
+  ano: z.number(),            // Ex: 2025
+});
+
+
+const BlocoGeralPeriodoSchema = z.object({
+  bloco: z.string(),
+  mes: z.number().optional(),
+  ano: z.number(),
+});
+
+export const tempoGeralPorBloco = async (req: Request, res: Response) => {
+  try {
+    const { bloco, mes, ano } = BlocoGeralPeriodoSchema.parse(req.body);
+
+    const filtro: any = {
+      roomBloco: bloco,
+    };
+
+    // Se veio mês, busca só aquele mês
+    if (mes) {
+      filtro.monthRef = DateTime.fromObject(
+        { year: ano, month: mes, day: 1 },
+        { zone: fusoHorario }
+      ).toJSDate();
+    } else {
+      // Se não veio mês, pega o ano inteiro
+      filtro.monthRef = {
+        gte: DateTime.fromObject(
+          { year: ano, month: 1, day: 1 },
+          { zone: fusoHorario }
+        ).toJSDate(),
+        lt: DateTime.fromObject(
+          { year: ano + 1, month: 1, day: 1 },
+          { zone: fusoHorario }
+        ).toJSDate(),
+      };
+    }
+
+    const stats = await prisma.roomStats.findMany({
+      where: filtro,
+      select: {
+        roomIdAmbiente: true,
+        roomBloco: true,
+        monthRef: true,
+        totalReservedMin: true,
+        usageByWeekday: true,
+        totalUsedMin: true,
+        avgIdleMin: true,
+        avgUsageRate: true, 
+        totalBookings: true,
+        totalUsed: true,
+        totalCanceled: true,
+      },
+      orderBy: { monthRef: "asc" },
+    });
+
+    if (stats.length === 0) {
+      return res
+        .status(200)
+        .json({ message: "Nenhum dado encontrado para este bloco e período." });
+    }
+
+    // Retorna exatamente o que está no banco
+    const resultado = stats.map((s) => ({
+      bloco: s.roomBloco,
+      sala: s.roomIdAmbiente,
+      mesRef: DateTime.fromJSDate(s.monthRef).toFormat("yyyy-MM"),
+      reservado: s.totalReservedMin,
+      usado: s.totalUsedMin,
+      taxaUso: s.avgUsageRate, 
+      ociosidadeMedia: s.avgIdleMin,
+      usoPorSemana: s.usageByWeekday,
+      totalAgendamentos: s.totalBookings,
+      totalUsados: s.totalUsed,
+      totalCancelados: s.totalCanceled,
+    }));
+
+    return res.status(200).json(resultado);
+  } catch (error) {
+    console.error("Erro ao buscar dados de bloco:", error);
+    return res
+      .status(400)
+      .json({ message: "Erro ao buscar dados de bloco.", error });
+  }
+};
+
+
+export const searchForIndividual = async (req: Request, res: Response) => {
+  try {
+    const termo = String(req.query.termo || "").trim();
+    console.log(termo)
+    if (!termo) return res.status(200).json([]);
+    
+    // Buscar salas
+    const salas = await prisma.roomStats.findMany({
+      where: {
+          roomIdAmbiente: { contains: termo, mode: "insensitive" } 
+      },
+      select: {
+        roomIdAmbiente: true,
+      },
+      take: 5,
+    });
+
+
+    // Juntar resultados e limitar 5 no total
+    const resultado = [
+      ...salas.map((s) => ({ label: `${s.roomIdAmbiente}`, value: s.roomIdAmbiente })),
+    ].slice(0, 5);
+
+    return res.status(200).json(resultado);
+  } catch (error) {
+    console.error("Erro no autocomplete universal:", error);
+    return res.status(400).json([]);
+  }
+};

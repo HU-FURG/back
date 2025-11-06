@@ -54,7 +54,7 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 
   // Fazer a manutenção dos dados historicos
-  cron.schedule('21 10 * * *', async()=> {
+  cron.schedule('49 10 * * *', async()=> {
     console.log('executando Limpeza dia...')
     await clearPeriodsandUpdate();
   })

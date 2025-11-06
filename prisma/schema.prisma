@@ -15,6 +15,7 @@ model User {
   hierarquia   String
   lastLogin_at DateTime?
   createdAt    DateTime  @default(now())
+  active       Boolean   @default(true)
 
   roomPeriods           RoomPeriod[]
   scheduleTemplates     RoomScheduleTemplate[]
@@ -79,15 +80,53 @@ model RoomScheduleTemplate {
 model PeriodHistory {
   id             Int      @id @default(autoincrement())
   // Detalhe da sala 
-  roomIdAmbiente String
+  roomIdAmbiente String   
   roomBloco      String
-  // Detalhe do nome
-  userName       String?
+  // Detalhe de quem agendou
+  userName       String?  
   // Detalhes do Período
   start          DateTime
   end            DateTime
+  weekday        Int?      
+  // Pra quem foi agendado
   nome           String
+  used           Boolean @default(false)   
+  startService   DateTime?
+  endService     DateTime?  
+  // Para analise
+  durationMinutes       Int?
+  actualDurationMinutes Int?  
   archivedAt     DateTime @default(now())
+
+  @@index([roomIdAmbiente])
+  @@index([weekday])
+  @@index([roomIdAmbiente, start])
+  @@index([roomIdAmbiente, weekday, used])
+}
+
+model RoomStats {
+  id               Int       @id @default(autoincrement())
+  //  Identificação da sala
+  roomIdAmbiente   String
+  roomBloco        String
+  //  Período de referência (mês consolidado)
+  monthRef         DateTime  // Ex: 2025-10-01 (representa o mês)
+  //  Dados agregados gerais
+  totalReservedMin Int       // soma do tempo reservado no mês
+  totalUsedMin     Int       // soma do tempo realmente usado
+  avgIdleMin       Float?    // média de tempo ocioso entre reservas
+  avgUsageRate     Float?    // média (totalUsed / totalReserved)
+  //  Distribuição por dia da semana (0-5)
+  usageByWeekday   Json?     // exemplo: { "0": 300, "1": 700, ..., "6": 120 }
+  //  Contagem de eventos
+  totalBookings    Int       // total de agendamentos no mês
+  totalUsed        Int       // quantos foram usados (used = true)
+  totalCanceled    Int       // quantos não foram usados (used = false)
+
+  // Timestamps
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  @@index([roomIdAmbiente, monthRef])
 }
 
 // --- Novo Sistema de Notificação ---

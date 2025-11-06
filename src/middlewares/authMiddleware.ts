@@ -4,7 +4,7 @@ import { prisma } from "../prisma/client";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
 
-export function authenticateToken(req: Request, res: Response, next: NextFunction) {
+export function authenticateToken(req: Request, res: Response, next: NextFunction) { // verifica o jwt ainda é valido
   const token = req.cookies.token; // agora pega do cookie
   if (!token) return res.sendStatus(401);
 
@@ -15,17 +15,18 @@ export function authenticateToken(req: Request, res: Response, next: NextFunctio
   });
 }
 
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const userLogin = (req as any).user?.login; //!chega aqui?
-  console.log('userlogin-', userLogin)
-  if (!userLogin) return res.status(401).json({ error: "Não autenticado" });
+export function requireRole(roles: string[]) { // verificar se o usuario pode ou n ter acesso
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const userLogin = (req as any).user?.login;
+    if (!userLogin) return res.status(401).json({ error: "Não autenticado" });
 
-  const user = await prisma.user.findUnique({ where: { login: userLogin } });
-  if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
+    const user = await prisma.user.findUnique({ where: { login: userLogin } });
+    if (!user) return res.status(401).json({ error: "Usuário não encontrado" });
 
-  if (user.hierarquia !== "admin") { 
-    return res.status(403).json({ error: "Acesso negado: admin apenas" });
-  }
+    if (!roles.includes(user.hierarquia)) {
+      return res.status(403).json({ error: "Acesso não permitido para esse cargo" });
+    }
 
-  next();
+    next();
+  };
 }
