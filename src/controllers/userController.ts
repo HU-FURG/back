@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import bcrypt from "bcrypt";
+import { Hierarquia } from '@prisma/client';
 
 const loginSchema = z.object({
   login: z.string(),
@@ -132,7 +133,7 @@ export async function createUser(req: Request, res: Response) {
     }
 
     const newUser = await prisma.user.create({
-      data: { login, senha: hashedPassword, hierarquia: cargo || "user" },
+      data: { login, senha: hashedPassword, hierarquia: cargo || Hierarquia.user },
     });
 
     console.log("✅ Usuário criado:", newUser);
@@ -148,21 +149,83 @@ export async function removeUser(req: Request, res: Response) {
   try {
     console.log("Removendo usuário:", req.body);
 
-    const { login } = z.object({ login: z.string() }).parse(req.body);
+    // 🔒 Validação segura
+    const schema = z.object({
+      login: z.string().min(1, "Login é obrigatório"),
+      force: z.boolean().optional(),
+    });
 
+    const parsed = schema.safeParse(req.body);
+
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ error: parsed.error.errors[0].message });
+    }
+
+    const { login, force } = parsed.data;
+
+    // 🔎 Busca usuário
     const user = await prisma.user.findUnique({ where: { login } });
     if (!user) {
       console.warn("⚠️ Usuário não encontrado:", login);
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
-    await prisma.user.update({ where: { login }, data: {active: false} });
-    console.log("✅ Usuário removido:", login);
+    // 🔍 Verifica reservas ativas
+    const reservasAtivas = await prisma.roomPeriod.findMany({
+      where: { userId: user.id, end: { gte: new Date() } },
+      include: { room: true },
+    });
 
+    // ❗ Se tiver reservas e não for "force", retorna aviso
+    if (reservasAtivas.length > 0 && !force) {
+      return res.status(400).json({
+        error:
+          "Usuário possui reservas ativas. Use 'force: true' para cancelar e remover.",
+      });
+    }
+
+    // ⚙️ Se for force, arquiva reservas antes de apagar
+    if (reservasAtivas.length > 0 && force) {
+      console.log(`⚠️ Cancelando ${reservasAtivas.length} reservas do usuário...`);
+
+      const templates = reservasAtivas.map((r) => {
+        const durationInMinutes =
+          (r.end.getTime() - r.start.getTime()) / (1000 * 60);
+
+        return {
+          userId: r.userId,
+          nome: r.nome,
+          durationInMinutes,
+          roomIdAmbiente: r.room?.ID_Ambiente ?? "Desconhecido",
+          roomBloco: r.room?.bloco ?? "Desconhecido",
+          originalStart: r.start,
+          originalEnd: r.end,
+          reason: "Cancelado por remoção de usuário",
+        };
+      });
+
+      // 🔄 Usa transação para garantir consistência
+      await prisma.$transaction([
+        prisma.roomScheduleTemplate.createMany({ data: templates }),
+        prisma.roomPeriod.deleteMany({ where: { userId: user.id } }),
+      ]);
+
+      console.log("🗑️ Reservas movidas e removidas com sucesso.");
+    }
+
+    // 🧍‍♂️ Desativa o usuário
+    await prisma.user.update({
+      where: { login },
+      data: { active: false },
+    });
+
+    console.log("✅ Usuário removido:", login);
     res.json({ success: true, login });
   } catch (err) {
     console.error("❌ Erro ao remover usuário:", err);
-    res.status(500).json({ error: "Erro interno" });
+    res.status(500).json({ error: "Erro interno ao remover usuário" });
   }
 }
 

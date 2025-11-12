@@ -9,6 +9,7 @@ async function main() {
       login: "admin",
       senha: hashedPassword,
       hierarquia: "admin",
+      nome: "Conta Administrativa"
     },
   });
 

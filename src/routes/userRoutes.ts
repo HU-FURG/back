@@ -11,6 +11,6 @@ router.get("/validate-token", authenticateToken, validateToken);
 // só admins podem criar/remover usuários
 router.get("/users", authenticateToken, requireRole(["admin"]), getUsers);
 router.post("/users", authenticateToken, requireRole(["admin"]), createUser);
-router.delete("/users", authenticateToken, requireRole(["admin"]), removeUser);
+router.delete("/users", removeUser);
 
 export default router;

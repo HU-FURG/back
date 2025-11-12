@@ -8,18 +8,33 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Hierarquia {
+  admin
+  user
+}
+
 model User {
   id           Int       @id @default(autoincrement())
   login        String    @unique
   senha        String
-  hierarquia   String
+
+  email        String?   @unique
+  nome         String?   
+
+  hierarquia   Hierarquia @default(user)
   lastLogin_at DateTime?
+
   createdAt    DateTime  @default(now())
   active       Boolean   @default(true)
 
+  // Novo campo — define se o admin quer confirmar manualmente os agendamentos
+  autoApprove  Boolean   @default(false)
+
+  // Relações
   roomPeriods           RoomPeriod[]
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
+  histories             PeriodHistory[]
 }
 
 model Room {
@@ -41,11 +56,17 @@ model Room {
 model RoomPeriod {
   id          Int      @id @default(autoincrement())
   roomId      Int
-  userId      Int?
+  userId      Int?      // usuário que agendou
+  nome        String    // pra quem foi agendado
+
   start       DateTime
   end         DateTime
-  nome        String
+
+  maxScheduleTime DateTime?
+
   isRecurring Boolean  @default(false)
+  approved    Boolean  @default(false) // saber se foi realmente aprovado
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -54,22 +75,25 @@ model RoomPeriod {
 
   @@index([roomId, start])
   @@index([roomId, end])
+  @@index([userId])
 }
 
 // --- Novo Sistema de Templates/Reagendamento ---
-// Este modelo armazena agendamentos que podem ser re-agendados.
-// Um agendamento é movido para cá quando vence ou é cancelado.
+// Este modelo armazena agendamentos que podem ser re-agendados. Um agendamento é movido para cá quando vence ou é cancelado.
 model RoomScheduleTemplate {
   id                Int      @id @default(autoincrement())
   userId            Int?
   nome              String
   durationInMinutes Int
+
   // Detalhes da Sala (para caso a sala seja excluída)
   roomIdAmbiente    String
   roomBloco         String
+
   // Detalhes da Ação
   originalStart     DateTime // Início original (para referência)
   originalEnd       DateTime // Fim original (para referência)
+  
   reason            String  // Motivo da template (e.g., "Vencido", "Cancelado")
   archivedAt        DateTime @default(now())
 
@@ -79,20 +103,26 @@ model RoomScheduleTemplate {
 // --- Histórico para Análises Individuais ---
 model PeriodHistory {
   id             Int      @id @default(autoincrement())
+
   // Detalhe da sala 
   roomIdAmbiente String   
   roomBloco      String
+
   // Detalhe de quem agendou
-  userName       String?  
+  userId         Int?   
+  user           User?    @relation(fields: [userId], references: [id])  
+
   // Detalhes do Período
   start          DateTime
   end            DateTime
-  weekday        Int?      
+  weekday        Int?     
+
   // Pra quem foi agendado
   nome           String
   used           Boolean @default(false)   
   startService   DateTime?
   endService     DateTime?  
+
   // Para analise
   durationMinutes       Int?
   actualDurationMinutes Int?  
@@ -104,20 +134,25 @@ model PeriodHistory {
   @@index([roomIdAmbiente, weekday, used])
 }
 
+// guarda informações gerais de uso diario das salas pelo mês
 model RoomStats {
   id               Int       @id @default(autoincrement())
   //  Identificação da sala
   roomIdAmbiente   String
   roomBloco        String
+
   //  Período de referência (mês consolidado)
   monthRef         DateTime  // Ex: 2025-10-01 (representa o mês)
+
   //  Dados agregados gerais
   totalReservedMin Int       // soma do tempo reservado no mês
   totalUsedMin     Int       // soma do tempo realmente usado
   avgIdleMin       Float?    // média de tempo ocioso entre reservas
   avgUsageRate     Float?    // média (totalUsed / totalReserved)
+
   //  Distribuição por dia da semana (0-5)
   usageByWeekday   Json?     // exemplo: { "0": 300, "1": 700, ..., "6": 120 }
+
   //  Contagem de eventos
   totalBookings    Int       // total de agendamentos no mês
   totalUsed        Int       // quantos foram usados (used = true)
@@ -132,13 +167,13 @@ model RoomStats {
 // --- Novo Sistema de Notificação ---
 // Para avisar o cliente sobre o status de um agendamento.
 model Notification {
-  id            Int      @id @default(autoincrement())
-  userId        Int // Para quem é a notificação
-  message       String // A mensagem da notificação (e.g., "Seu agendamento na Sala X acabou.")
-  isRead        Boolean  @default(false)
-  type          String // Tipo (e.g., "FIM_AGENDAMENTO", "CANCELAMENTO", "REAGENDAMENTO_SUCESSO")
-  relatedRoomId Int? // Opcional: ID da sala relacionada
-  createdAt     DateTime @default(now())
+  id            Int       @id @default(autoincrement())
+  userId        Int       // Para quem é a notificação
+  message       String    @db.Text
+  isRead        Boolean   @default(false)
+  type          String    // Tipo (e.g., "FIM_AGENDAMENTO", "CANCELAMENTO", "REAGENDAMENTO_SUCESSO")
+  relatedRoomId Int?      // Opcional: ID da sala relacionada
+  createdAt     DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
 }
