@@ -56,10 +56,10 @@ async function main() {
     nome: `user ${i + 1}`,
   }));
 
-  // await prisma.user.createMany({
-  //   data: usuariosComuns,
-  //   skipDuplicates: true, 
-  // });
+  await prisma.user.createMany({
+    data: usuariosComuns,
+    skipDuplicates: true, 
+  });
 
   console.log(`${usuariosComuns.length} usuários criados!`);
 }

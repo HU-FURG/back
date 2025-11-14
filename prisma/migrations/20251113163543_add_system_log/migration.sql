@@ -1,11 +1,29 @@
+-- CreateEnum
+CREATE TYPE "public"."Hierarquia" AS ENUM ('admin', 'user');
+
+-- CreateTable
+CREATE TABLE "public"."SystemLog" (
+    "id" SERIAL NOT NULL,
+    "key" TEXT NOT NULL,
+    "value" TEXT,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SystemLog_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateTable
 CREATE TABLE "public"."User" (
     "id" SERIAL NOT NULL,
     "login" TEXT NOT NULL,
     "senha" TEXT NOT NULL,
-    "hierarquia" TEXT NOT NULL,
+    "email" TEXT,
+    "nome" TEXT,
+    "hierarquia" "public"."Hierarquia" NOT NULL DEFAULT 'user',
     "lastLogin_at" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "autoApprove" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
 );
@@ -32,10 +50,12 @@ CREATE TABLE "public"."RoomPeriod" (
     "id" SERIAL NOT NULL,
     "roomId" INTEGER NOT NULL,
     "userId" INTEGER,
+    "nome" TEXT NOT NULL,
     "start" TIMESTAMP(3) NOT NULL,
     "end" TIMESTAMP(3) NOT NULL,
-    "nome" TEXT NOT NULL,
+    "maxScheduleTime" TIMESTAMP(3),
     "isRecurring" BOOLEAN NOT NULL DEFAULT false,
+    "approved" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -49,7 +69,7 @@ CREATE TABLE "public"."RoomScheduleTemplate" (
     "nome" TEXT NOT NULL,
     "durationInMinutes" INTEGER NOT NULL,
     "roomIdAmbiente" TEXT NOT NULL,
-    "roomAla" TEXT NOT NULL,
+    "roomBloco" TEXT NOT NULL,
     "originalStart" TIMESTAMP(3) NOT NULL,
     "originalEnd" TIMESTAMP(3) NOT NULL,
     "reason" TEXT NOT NULL,
@@ -62,14 +82,40 @@ CREATE TABLE "public"."RoomScheduleTemplate" (
 CREATE TABLE "public"."PeriodHistory" (
     "id" SERIAL NOT NULL,
     "roomIdAmbiente" TEXT NOT NULL,
-    "roomAla" TEXT NOT NULL,
-    "userName" TEXT,
+    "roomBloco" TEXT NOT NULL,
+    "userId" INTEGER,
     "start" TIMESTAMP(3) NOT NULL,
     "end" TIMESTAMP(3) NOT NULL,
+    "weekday" INTEGER,
     "nome" TEXT NOT NULL,
+    "used" BOOLEAN NOT NULL DEFAULT false,
+    "startService" TIMESTAMP(3),
+    "endService" TIMESTAMP(3),
+    "durationMinutes" INTEGER,
+    "actualDurationMinutes" INTEGER,
     "archivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PeriodHistory_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."RoomStats" (
+    "id" SERIAL NOT NULL,
+    "roomIdAmbiente" TEXT NOT NULL,
+    "roomBloco" TEXT NOT NULL,
+    "monthRef" TIMESTAMP(3) NOT NULL,
+    "totalReservedMin" INTEGER NOT NULL,
+    "totalUsedMin" INTEGER NOT NULL,
+    "avgIdleMin" DOUBLE PRECISION,
+    "avgUsageRate" DOUBLE PRECISION,
+    "usageByWeekday" JSONB,
+    "totalBookings" INTEGER NOT NULL,
+    "totalUsed" INTEGER NOT NULL,
+    "totalCanceled" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RoomStats_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -86,7 +132,13 @@ CREATE TABLE "public"."Notification" (
 );
 
 -- CreateIndex
+CREATE UNIQUE INDEX "SystemLog_key_key" ON "public"."SystemLog"("key");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "User_login_key" ON "public"."User"("login");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Room_ID_Ambiente_key" ON "public"."Room"("ID_Ambiente");
@@ -97,6 +149,24 @@ CREATE INDEX "RoomPeriod_roomId_start_idx" ON "public"."RoomPeriod"("roomId", "s
 -- CreateIndex
 CREATE INDEX "RoomPeriod_roomId_end_idx" ON "public"."RoomPeriod"("roomId", "end");
 
+-- CreateIndex
+CREATE INDEX "RoomPeriod_userId_idx" ON "public"."RoomPeriod"("userId");
+
+-- CreateIndex
+CREATE INDEX "PeriodHistory_roomIdAmbiente_idx" ON "public"."PeriodHistory"("roomIdAmbiente");
+
+-- CreateIndex
+CREATE INDEX "PeriodHistory_weekday_idx" ON "public"."PeriodHistory"("weekday");
+
+-- CreateIndex
+CREATE INDEX "PeriodHistory_roomIdAmbiente_start_idx" ON "public"."PeriodHistory"("roomIdAmbiente", "start");
+
+-- CreateIndex
+CREATE INDEX "PeriodHistory_roomIdAmbiente_weekday_used_idx" ON "public"."PeriodHistory"("roomIdAmbiente", "weekday", "used");
+
+-- CreateIndex
+CREATE INDEX "RoomStats_roomIdAmbiente_monthRef_idx" ON "public"."RoomStats"("roomIdAmbiente", "monthRef");
+
 -- AddForeignKey
 ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "public"."Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -105,6 +175,9 @@ ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_userId_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "public"."RoomScheduleTemplate" ADD CONSTRAINT "RoomScheduleTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."PeriodHistory" ADD CONSTRAINT "PeriodHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

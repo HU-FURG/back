@@ -62,9 +62,10 @@ export async function login(req: Request, res: Response) {
     });
 
     const cargo = user.hierarquia;
-    console.log("Login bem sucedido:", { login, cargo });
+  
+    console.log("Login bem sucedido:", { login, cargo  });
 
-    return res.status(200).json({ login, cargo });
+    return res.status(200).json({ login, cargo, nome: user.nome });
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error("❌ Erro de validação no login:", error.errors);
@@ -73,6 +74,59 @@ export async function login(req: Request, res: Response) {
 
     console.error('❌ Erro ao logar:', error);
     return res.status(500).json({ error: 'Erro interno do servidor' });
+  }
+}
+
+export async function loginAnonimo(req: Request, res: Response) {//verificado
+  try {
+    console.log("👤 Login anônimo solicitado");
+
+    const anonLogin = "anonimo";
+    const anonSenha = "1234";
+
+    let user = await prisma.user.findUnique({ where: { login: anonLogin } });
+    console.log(" Usuário anonimo encontrado?", !!user);
+
+    if (!user) {
+      console.log("Criando usuário anonimo...");
+      const hashedPassword = await bcrypt.hash(anonSenha, 10);
+      user = await prisma.user.create({
+        data: { login: anonLogin, senha: hashedPassword, hierarquia: "admin", nome: "Usuário Anônimo" },
+      });
+      console.log(" Usuário anonimo criado:", user);
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin_at: new Date() },
+    });
+    
+    console.log("Atualizado lastLogin_at para anonimo");
+
+    const token = jwt.sign(
+      { userId: user.id, login: user.login },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    console.log(" Token anônimo gerado:", token.substring(0, 20) + "...");
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    console.log("Logou como anonimo");
+    const obj = {
+      login: user.login,
+      cargo: user.hierarquia
+    }
+    return res.status(200).json(obj);
+  } catch (err) {
+    console.error(" Erro no login anônimo:", err);
+    return res.status(500).json({ error: "Erro interno no login anônimo" });
   }
 }
 
@@ -108,44 +162,70 @@ export function logout(req: Request, res: Response) {
 }
 
 const createUserSchema = z.object({
-  login: z.string(),
-  senha: z.string(),
-  cargo: z.string().optional(),
+  login: z.string().min(3, "Login muito curto"),
+  senha: z.string().min(4, "Senha muito curta"),
+  cargo: z.enum(["admin", "user"]).optional(),
+  email: z.string().email().optional(),
+  nome: z.string().optional(),
 });
 
-export async function createUser(req: Request, res: Response) {
+export async function createUser(req: Request, res: Response) {//verificado
   try {
-    console.log(" Criando usuário:", req.body);
+    console.log("Criando usuário:", req.body);
 
-    const { login, senha, cargo } = createUserSchema.parse(req.body);
+    const { login, senha, cargo, email, nome } = createUserSchema.parse(req.body);
 
+    // Verifica duplicidade
     const exists = await prisma.user.findUnique({ where: { login } });
 
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email } });
+      if (existingEmail) {
+        console.warn("E-mail já está em uso:", email);
+        return res.status(400).json({ error: "E-mail já está em uso" });
+      }
+    }
+
     if (exists) {
-      console.warn(" Usuário já existe:", login);
+      console.warn("Usuário já existe:", login);
       return res.status(400).json({ error: "Usuário já existe" });
     }
 
+    //  Criptografa senha
     const hashedPassword = await bcrypt.hash(senha, 10);
-    
-    if (!cargo || !["user", "admin", ""].includes(cargo)) {
-      return res.status(400).json({ error: "Cargo não existe" });
-    }
 
+    //  Define hierarquia (default = user)
+    const hierarquia = cargo === "admin" ? Hierarquia.admin : Hierarquia.user;
+
+    //  Cria novo usuário
     const newUser = await prisma.user.create({
-      data: { login, senha: hashedPassword, hierarquia: cargo || Hierarquia.user },
+      data: {
+        login,
+        senha: hashedPassword,
+        hierarquia,
+        nome: nome || login,
+        email,
+        autoApprove: false, 
+        active: true,
+      },
     });
 
-    console.log("✅ Usuário criado:", newUser);
-    res.status(201).json({ login: newUser.login, cargo: newUser.hierarquia });
+    console.log(" Usuário criado:", newUser.login, "-", newUser.hierarquia);
+    res.status(201).json({
+      success: true,
+      login: newUser.login,
+      hierarquia: newUser.hierarquia,
+    });
 
   } catch (err) {
-    console.error("❌ Erro ao criar usuário:", err);
-    res.status(500).json({ error: "Erro interno" });
+    console.error("Erro ao criar usuário:", err);
+    if (err instanceof z.ZodError)
+      return res.status(400).json({ error: err.errors });
+    res.status(500).json({ error: "Erro interno no servidor" });
   }
 }
 
-export async function removeUser(req: Request, res: Response) {
+export async function removeUser(req: Request, res: Response) { //verificado
   try {
     console.log("Removendo usuário:", req.body);
 
@@ -229,7 +309,7 @@ export async function removeUser(req: Request, res: Response) {
   }
 }
 
-export async function getUsers(req: Request, res: Response) {
+export async function getUsers(req: Request, res: Response) {// verificado {falta pages}
   try {
     console.log("📋 Buscando lista de usuários...");
 
@@ -246,54 +326,3 @@ export async function getUsers(req: Request, res: Response) {
   }
 }
 
-export async function loginAnonimo(req: Request, res: Response) {
-  try {
-    console.log("👤 Login anônimo solicitado");
-
-    const anonLogin = "anonimo";
-    const anonSenha = "1234";
-
-    let user = await prisma.user.findUnique({ where: { login: anonLogin } });
-    console.log("🔍 Usuário anonimo encontrado?", !!user);
-
-    if (!user) {
-      console.log("⚙️ Criando usuário anonimo...");
-      const hashedPassword = await bcrypt.hash(anonSenha, 10);
-      user = await prisma.user.create({
-        data: { login: anonLogin, senha: hashedPassword, hierarquia: "admin" },
-      });
-      console.log("✅ Usuário anonimo criado:", user);
-    }
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { lastLogin_at: new Date() },
-    });
-    
-    console.log("📅 Atualizado lastLogin_at para anonimo");
-
-    const token = jwt.sign(
-      { userId: user.id, login: user.login },
-      JWT_SECRET,
-      { expiresIn: "7d" }
-    );
-    console.log("✅ Token anônimo gerado:", token.substring(0, 20) + "...");
-
-    res.cookie("token", token, {
-      httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-
-    console.log("🎉 Logou como anonimo");
-    const obj = {
-      login: user.login,
-      cargo: user.hierarquia
-    }
-    return res.status(200).json(obj);
-  } catch (err) {
-    console.error("❌ Erro no login anônimo:", err);
-    return res.status(500).json({ error: "Erro interno no login anônimo" });
-  }
-}

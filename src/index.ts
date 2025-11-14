@@ -16,6 +16,7 @@ import rescheduleRouter from './routes/rescheduleRouter'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
+import { getSystemLog } from './prisma/systemLog';
 
 const app = express();
 
@@ -37,26 +38,39 @@ morgan.token('body', (req: any) => JSON.stringify(req.body));
 
 app.use(morgan(':method :url :status :response-time ms - body=:body'));
 
-app.use('/api', roomRoutes);
-app.use('/api', periodRoutes);
-app.use('/api', userRoutes);
-app.use('/api', dashboardRoutes)
-app.use('/api/scheduling', schedulingRoutes)
-app.use('/api/reschedule', rescheduleRouter)
-app.get('/health', (req, res) => res.sendStatus(200));
+app.use('/api', roomRoutes); // Salas
+app.use('/api', periodRoutes); // Agendamentos
+app.use('/api', userRoutes); // sistema login get users CRUD usuarios
+app.use('/api', dashboardRoutes) // dashboard
+app.use('/api/scheduling', schedulingRoutes) // gerenciamento de agendamentos
+app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
+
+app.get('/health', (req, res) => res.sendStatus(200)); // rota de verificação de deploy
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public', 'index.html'));
 });
 
+
 const PORT = Number(process.env.PORT) || 3333; 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Servidor rodando em http://localhost:${PORT}`);
 
-  // Fazer a manutenção dos dados historicos
-  cron.schedule('49 10 * * *', async()=> {
-    console.log('executando Limpeza dia...')
-    await clearPeriodsandUpdate();
-  })
-});
+  // Checa se precisa rodar logo no startup
+  const log = await getSystemLog('last_clear_update');
+  const lastRun = log?.updatedAt ?? new Date(0);
+  const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
 
+  if (diffHours >= 24) {
+    console.log('⚙️ Rodando rotina de limpeza atrasada no startup...');
+    await clearPeriodsandUpdate();
+  } else {
+    console.log(`⏳ Última limpeza há ${diffHours.toFixed(1)}h. Aguardando cron.`);
+  }
+
+  // Cron padrão - roda toda noite às 23h59
+  cron.schedule('59 23 * * *', async () => {
+    console.log('🕒 Executando rotina noturna de limpeza...');
+    await clearPeriodsandUpdate();
+  });
+});
