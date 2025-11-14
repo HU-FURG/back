@@ -265,50 +265,77 @@ function getWeekRange(): { startOfWeek: Date; endOfWeek: Date } {
 }
 
 export async function getRoomSchedule(req: Request, res: Response) {
-    const { roomId } = req.params;
+  const userId = (req as any).user?.userId;
+  const { roomId } = req.params;
 
-    if (!roomId || isNaN(Number(roomId))) {
-        return res.status(400).json({ message: 'ID da sala inválido.' });
-    }
+  if (!userId) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
 
-    try {
-        const roomIdNumber = Number(roomId);
-        const { startOfWeek, endOfWeek } = getWeekRange();
+  if (!roomId || isNaN(Number(roomId))) {
+    return res.status(400).json({ message: "ID da sala inválido." });
+  }
 
-        const reservations = await prisma.roomPeriod.findMany({
-            where: {
-                roomId: roomIdNumber,
-                start: { gte: startOfWeek },
-                end: { lte: endOfWeek },
-            },
-            select: {
-                id: true,
-                start: true,
-                end: true,
-            },
-            orderBy: { start: 'asc' },
-        });
+  // Buscar nível do usuário
+  const userData = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { hierarquia: true },
+  });
 
-        const formattedSchedule = reservations.map(r => {
-            const startTimeDate = new Date(r.start);
-            const endTimeDate = new Date(r.end);
+  const isAdmin = userData?.hierarquia === "admin";
 
-            const jsDay = startTimeDate.getDay();
-            const dayOfWeek = jsDay === 0 ? 7 : jsDay; // 1=Seg, 7=Dom
+  try {
+    const roomIdNumber = Number(roomId);
 
-            return {
-                id: r.id,
-                dayOfWeek,
-                startTime: startTimeDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-                endTime: endTimeDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            };
-        });
+    // Buscar todas as reservas da sala
+    const reservations = await prisma.roomPeriod.findMany({
+      where: { roomId: roomIdNumber },
+      orderBy: { start: "asc" },
+    });
 
-        return res.status(200).json(formattedSchedule);
+    const formattedSchedule = reservations.map((r) => {
+      const startTimeDate = new Date(r.start);
+      const endTimeDate = new Date(r.end);
 
-    } catch (error) {
-        console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
-        return res.status(500).json({ error: 'Erro interno do servidor ao buscar a agenda.' });
-    }
+      const jsDay = startTimeDate.getDay();
+      const dayOfWeek = jsDay === 0 ? 7 : jsDay;
+
+      return {
+        id: r.id,
+        dayOfWeek,
+
+        // Horários formatados
+        startTime: startTimeDate.toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        endTime: endTimeDate.toLocaleTimeString("pt-BR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+
+        // Informações usadas pelo client
+        isRecurring: r.isRecurring,
+        approved: r.approved,
+
+        // Datas completas (sempre enviadas)
+        start: r.start,
+        end: r.end,
+        maxScheduleTime: r.maxScheduleTime,
+        // Só admin vê:
+        ...(isAdmin && {
+          nome: r.nome,
+          userId: r.userId
+        }),
+      };
+    });
+
+    return res.status(200).json(formattedSchedule);
+  } catch (error) {
+    console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
+    return res.status(500).json({
+      error: "Erro interno do servidor ao buscar a agenda.",
+    });
+  }
 }
 

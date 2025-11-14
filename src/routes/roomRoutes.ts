@@ -16,5 +16,5 @@ router.post('/room',authenticateToken, createRoom);
 router.get('/rooms',authenticateToken,checkRoomUpdates, listRooms);
 router.patch('/room/:id', editRoom);
 router.post('/rooms/delete', deleteRooms);
-router.get('/room/:roomId/Schedule', getRoomSchedule)
+router.get('/room/:roomId/Schedule',authenticateToken, getRoomSchedule)
 export default router;
