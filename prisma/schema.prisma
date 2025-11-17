@@ -17,6 +17,7 @@ model SystemLog {
   id        Int      @id @default(autoincrement())
   key       String   @unique
   value     String?
+  autoApprove  Boolean   @default(false)
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 }
@@ -35,9 +36,6 @@ model User {
 
   createdAt    DateTime  @default(now())
   active       Boolean   @default(true)
-
-  // Novo campo — define se o admin quer confirmar manualmente os agendamentos
-  autoApprove  Boolean   @default(false)
 
   // Relações
   roomPeriods           RoomPeriod[]

@@ -32,7 +32,7 @@ export const AgendamentoSchema = z.object({
 type BuscarSalasBody = z.infer<typeof BodySchema>
 type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
-export const buscarSalasDisponiveis = async (req: Request, res: Response) => { // nova regra maxSchedule colocar verificação, ser possivel aenda depois do max no momento por se recorrente
+export const buscarSalasDisponiveis = async (req: Request, res: Response) => { 
   try {
     const { horarios, recorrente } = BodySchema.parse(req.body);
 
@@ -52,9 +52,6 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => { /
           const end = new Date(period.end);
           const diaDaSemanaPeriodo = start.getDay();
 
-          // --------------------------------------------
-          // CASO 1: Reserva da requisição é RECORRENTE
-          // --------------------------------------------
           if (recorrente) {
             if (period.isRecurring) {
               // Mesmo dia da semana e sobreposição de horário
@@ -180,10 +177,21 @@ export const agendarSala = async (req: Request, res: Response) => { //testar por
       }
     }
 
+    const autoApproveConfig = await prisma.systemLog.findUnique({
+      where: { key: "AUTO_APPROVE" }
+    });
+
+    const autoApprove =
+      autoApproveConfig?.value === "true";
+
     // --- Define o usuário dono da reserva ---
     const donoReserva = usuarioLogado.hierarquia === "admin"
       ? userId // admin agenda pra outro user
       : usuarioLogado.id; // user agenda pra ele mesmo
+
+    const approved =
+      usuarioLogado.hierarquia === "admin"
+        ? true : autoApprove;           
 
     // --- Cria registros ---
     const registros = horarios.map(({ data, horaInicio, horaFim }) => ({
@@ -196,7 +204,7 @@ export const agendarSala = async (req: Request, res: Response) => { //testar por
       maxScheduleTime: recorrente && maxScheduleDate
         ? new Date(`${maxScheduleDate}T23:59:59`)
         : null,
-      approved: usuarioLogado.hierarquia === "admin", // se admin, já aprova
+      approved: approved,
       createdAt: new Date(),
     }));
 
