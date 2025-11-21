@@ -82,3 +82,143 @@ export function validateHorarios(horarios: any[], recorrente: boolean) {
   // TUDO OK
   return { ok: true };
 }
+
+/** Estrutura de um período de agendamento existente (do banco de dados). */
+interface Period {
+    start: Date;
+    end: Date;
+    isRecurring: boolean;
+    // ... outras propriedades do seu período
+}
+
+/** Estrutura de um horário solicitado na requisição, já convertido para DateTime UTC. */
+interface ReqHorario {
+    inicio: DateTime;
+    fim: DateTime;
+    diaSemana: number; // 1 (Seg) a 7 (Dom)
+    // ... outras propriedades
+}
+
+// ============================================================================
+// 2) Lógica Universal de Conflito (O "Core" da verificação)
+// ============================================================================
+
+/**
+ * Verifica se existe conflito entre um pedido (req) e um registro do banco (db).
+ * Trata todos os casos: Pontual x Pontual, Recorrente x Recorrente, Híbridos.
+ */
+export function verificarConflitoUniversal(
+  // --- DADOS DA REQUISIÇÃO ---
+  reqDataStr: string,       // "YYYY-MM-DD"
+  reqHoraInicio: string,    // "HH:mm"
+  reqHoraFim: string,       // "HH:mm"
+  reqIsRecorrente: boolean,
+  reqMaxMeses: number,      // SE FOR 0 = INFINITO
+
+  // --- DADOS DO BANCO ---
+  dbStart: Date,            
+  dbEnd: Date | null,       
+  dbIsRecorrente: boolean,
+  dbMaxRecurrenceEnd: Date | null // SE FOR NULL = INFINITO
+): boolean {
+
+  // =======================================================================
+  // A. PREPARAÇÃO DAS DATAS E VIGÊNCIA (AQUI ESTAVA O ERRO DO ZERO)
+  // =======================================================================
+
+  const reqInicioDT = DateTime.fromISO(`${reqDataStr}T${reqHoraInicio}`, { zone: TZ });
+  const reqVigenciaInicio = reqInicioDT.startOf('day');
+  
+  // --------------------------------------------------------
+  // CORREÇÃO 1: Tratar reqMaxMeses === 0 como Infinito
+  // --------------------------------------------------------
+  let reqVigenciaFim: DateTime;
+
+  if (reqIsRecorrente) {
+      // Se for 0, significa "sem limite" (Infinito) -> Jogamos 100 anos pra frente
+      if (reqMaxMeses === 0) {
+          reqVigenciaFim = reqInicioDT.plus({ years: 100 }).endOf('day');
+      } else {
+          // Se tiver valor (ex: 6 meses), soma os meses
+          reqVigenciaFim = reqInicioDT.plus({ months: reqMaxMeses }).endOf('day');
+      }
+  } else {
+      // Se não é recorrente, morre no mesmo dia
+      reqVigenciaFim = reqInicioDT.endOf('day');
+  }
+
+  // --------------------------------------------------------
+  // PREPARAÇÃO DO BANCO (DB)
+  // --------------------------------------------------------
+  const dbInicioDT = DateTime.fromJSDate(dbStart).setZone(TZ);
+  
+  let dbVigenciaFim: DateTime;
+
+  if (dbIsRecorrente) {
+      // CORREÇÃO 2: Se dbMaxRecurrenceEnd for null ou invalido, considera Infinito
+      if (!dbMaxRecurrenceEnd) {
+          dbVigenciaFim = dbInicioDT.plus({ years: 100 }).endOf('day');
+      } else {
+          dbVigenciaFim = DateTime.fromJSDate(dbMaxRecurrenceEnd).setZone(TZ).endOf('day');
+      }
+  } else {
+      // Não recorrente: usa o dbEnd ou assume mesmo dia
+      dbVigenciaFim = dbEnd 
+          ? DateTime.fromJSDate(dbEnd).setZone(TZ).endOf('day') 
+          : dbInicioDT.endOf('day');
+  }
+
+  // LOGS PARA CONFERIR SE O ZERO VIROU "FUTURO"
+  /**/
+  console.log(`\n🔍 [VIGÊNCIA DEBUG]`);
+  console.log(`   Req (${reqIsRecorrente ? 'Rec' : 'Único'} | Meses: ${reqMaxMeses}): ${reqVigenciaInicio.toISODate()} até ${reqVigenciaFim.toISODate()}`);
+  console.log(`   DB  (${dbIsRecorrente  ? 'Rec' : 'Único'}): ${dbInicioDT.toISODate()} até ${dbVigenciaFim.toISODate()}`);
+  
+
+  // =======================================================================
+  // B. PREPARAÇÃO DE HORÁRIOS (TIME ONLY - Ano 2000)
+  // =======================================================================
+  const reqFimDT    = DateTime.fromISO(`${reqDataStr}T${reqHoraFim}`, { zone: TZ });
+  const reqWeekday  = reqInicioDT.weekday; 
+  const dbWeekday   = dbInicioDT.weekday;
+
+  const baseDate = DateTime.fromISO('2000-01-01');
+  const rHoraStart = baseDate.set({ hour: reqInicioDT.hour, minute: reqInicioDT.minute });
+  const rHoraEnd   = baseDate.set({ hour: reqFimDT.hour, minute: reqFimDT.minute });
+
+  const dHoraStart = baseDate.set({ hour: dbInicioDT.hour, minute: dbInicioDT.minute });
+  
+  // Ajuste do horário fim do DB
+  let dHoraEnd;
+  if (dbEnd) {
+      const dbFimReal = DateTime.fromJSDate(dbEnd).setZone(TZ);
+      dHoraEnd = baseDate.set({ hour: dbFimReal.hour, minute: dbFimReal.minute });
+      // Se virou o dia ou bugou a hora, garante pelo menos 1 min de duração
+      if (dHoraEnd <= dHoraStart) dHoraEnd = dHoraStart.plus({ minutes: 1 });
+  } else {
+      // Fallback padrão 1h
+      dHoraEnd = dHoraStart.plus({ hours: 1 });
+  }
+
+  // =======================================================================
+  // C. CHECAGENS FINAIS
+  // =======================================================================
+  
+  // 1. DIA DA SEMANA (Só importa se algúm for recorrente)
+  const algumRecorrente = reqIsRecorrente || dbIsRecorrente;
+  if (algumRecorrente && reqWeekday !== dbWeekday) {
+      return false; 
+  }
+
+  // 2. INTERSEÇÃO DE HORÁRIO (HH:mm)
+  const horarioColide = (rHoraStart < dHoraEnd) && (rHoraEnd > dHoraStart);
+  if (!horarioColide) {
+      return false;
+  }
+
+  // 3. INTERSEÇÃO DE VIGÊNCIA (DATAS)
+  // Agora que reqVigenciaFim está correta (com o +100 anos se for 0), essa conta funciona
+  const vigenciaColide = (reqVigenciaInicio < dbVigenciaFim) && (reqVigenciaFim > dbInicioDT);
+  
+  return vigenciaColide;
+}

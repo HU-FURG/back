@@ -1,8 +1,8 @@
 import { Request, Response } from 'express'
 import { prisma } from '../prisma/client'
 import { z } from 'zod'
-import { DateTime } from "luxon";
-import { validateHorarios } from '../auxiliar/validateHorarios';
+import { DateTime, Interval } from "luxon";
+import { validateHorarios, verificarConflitoUniversal } from '../auxiliar/validateHorarios';
 
 const TZ = "America/Sao_Paulo";
 
@@ -17,6 +17,9 @@ const BodySchema = z.object({
   horarios: z.array(HorarioSchema),
   recorrente: z.boolean(),
   maxTimeRecorrente: z.number(), // em meses
+  lastRoomId: z.number().optional().default(-1), 
+  numeroSala: z.string().optional(),
+  bloco: z.string().optional(),
 })
 
 export const AgendamentoSchema = z.object({
@@ -31,135 +34,9 @@ export const AgendamentoSchema = z.object({
 type BuscarSalasBody = z.infer<typeof BodySchema>
 type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
-// export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
-//   try {
-//     const { horarios, recorrente, maxTimeRecorrente } = BodySchema.parse(req.body);
-
-//     const result = validateHorarios(horarios, recorrente);
-
-//     if (!result.ok) {
-//       return res.status(400).json({ message: result.error });
-//     }
-
-//     const TZ = "America/Sao_Paulo";
-
-//     const salasAtivas = await prisma.room.findMany({
-//       where: { active: true },
-//       include: { periods: true },
-//     });
-
-//     const salasDisponiveis = salasAtivas.filter((sala) => {
-//       return horarios.every(({ data, horaInicio, horaFim }) => {
-        
-//         // FRONT → horário BR → converter uma vez para UTC
-//         const inicioReqUTC = DateTime
-//           .fromISO(`${data}T${horaInicio}`, { zone: TZ })
-//           .toUTC();
-
-//         const fimReqUTC = DateTime
-//           .fromISO(`${data}T${horaFim}`, { zone: TZ })
-//           .toUTC();
-
-//         const diaSemanaReq = inicioReqUTC.weekday;
-
-//         const temConflito = sala.periods.some((period) => {
-
-//           // Banco já está em UTC → NÃO reconverter para BR
-//           const start = DateTime.fromJSDate(period.start).toUTC();
-//           const end   = DateTime.fromJSDate(period.end).toUTC();
-//           const diaSemanaPeriodo = start.weekday;
-
-//           // =============================
-//           //   RESERVA RECORRENTE
-//           // =============================
-//           if (recorrente) {
-
-//             // --- Periodo também é recorrente
-//             if (period.isRecurring) {
-//               if (diaSemanaReq !== diaSemanaPeriodo) return false;
-
-//               const reqStartHM = inicioReqUTC.toFormat("HH:mm");
-//               const reqEndHM   = fimReqUTC.toFormat("HH:mm");
-//               const perStartHM = start.toFormat("HH:mm");
-//               const perEndHM   = end.toFormat("HH:mm");
-
-//               const conflita =
-//                 !(reqEndHM <= perStartHM || reqStartHM >= perEndHM);
-
-//               return conflita;
-//             }
-
-//             // --- Periodo é pontual
-//             else {
-//               if (start < DateTime.utc()) return false;
-//               if (diaSemanaReq !== diaSemanaPeriodo) return false;
-
-//               const conflita =
-//                 !(fimReqUTC <= start || inicioReqUTC >= end);
-
-//               return conflita;
-//             }
-//           }
-
-//           // =============================
-//           //   RESERVA PONTUAL
-//           // =============================
-//           else {
-
-//             // --- Agendamento existente é recorrente
-//             if (period.isRecurring) {
-
-//               if (inicioReqUTC < start) return false;
-
-//               if (diaSemanaReq !== diaSemanaPeriodo) return false;
-
-//               const recStartNaData = inicioReqUTC.set({
-//                 hour: start.hour,
-//                 minute: start.minute,
-//               });
-
-//               const recEndNaData = inicioReqUTC.set({
-//                 hour: end.hour,
-//                 minute: end.minute,
-//               });
-
-//               const conflita =
-//                 !(fimReqUTC <= recStartNaData || inicioReqUTC >= recEndNaData);
-
-//               return conflita;
-//             }
-
-//             // --- Ambos pontuais
-//             const conflita =
-//               !(fimReqUTC <= start || inicioReqUTC >= end);
-
-//             return conflita;
-//           }
-//         });
-
-//         return !temConflito;
-//       });
-//     });
-
-//     return res.status(200).json(
-//       salasDisponiveis.map((sala) => ({
-//         id: sala.id,
-//         nome: sala.ID_Ambiente,
-//         tipo: sala.tipo ?? "",
-//         ala: sala.bloco,
-//         status: sala.active ? "active" : "inactive",
-//       }))
-//     );
-
-//   } catch (error) {
-//     console.error(error);
-//     return res.status(400).json({ message: "Erro ao buscar salas disponíveis." });
-//   }
-// };
-
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
-    const { horarios, recorrente } = req.body;
+    const { horarios, recorrente,maxTimeRecorrente, lastRoomId, numeroSala, bloco } = req.body;
 
     // ==================================================
     // 1) VALIDAÇÃO INICIAL DOS HORÁRIOS
@@ -189,138 +66,112 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     // Para recorrência, só importa o primeiro horário
     const baseReq = horariosReq[0];
 
+    // NOVO: Determina a data máxima de validade da recorrência pedida (se houver)
+    const maxRecurrenceEnd = recorrente
+        ? baseReq.inicio.plus({ months: maxTimeRecorrente })
+        : undefined;
+
     // ==================================================
-    // 3) Buscar SOMENTE AS 10 PRIMEIRAS SALAS ativas
-    //    (evita overSearch)
+    // 3) Buscar as salas, aplicando filtros e paginação
     // ==================================================
+
+    let whereCondition: any = { active: true };
+    let takeLimit: number | undefined = undefined; // Por padrão, busca TUDO.
+
+    // Checa se é uma busca filtrada (que sempre deve começar do ID 1)
+    const isFilteredSearch = !!numeroSala || !!bloco;
+    
+    // --- FILTROS ---
+    if (numeroSala) {
+        whereCondition.ID_Ambiente = { contains: numeroSala, mode: 'insensitive' };
+    }
+    
+    if (bloco) {
+        whereCondition.bloco = { equals: bloco, mode: 'insensitive' };
+    }
+    
+    // --- LÓGICA DE PAGINAÇÃO (apenas se NÃO houver filtros e lastRoomId > -1) ---
+    if (!isFilteredSearch && lastRoomId > -1) {
+        // Se a paginação está ativa, buscamos a partir do último ID.
+        // Usamos um 'take' alto (ex: 50) para garantir que temos salas suficientes para encontrar 12 DISPONÍVEIS.
+        whereCondition.id = { gt: lastRoomId };
+    }
+
+    // A busca inicial no Prisma
     const salas = await prisma.room.findMany({
-      where: { active: true },
-      take: 10,
-      orderBy: { id: "asc" },
-      include: {
-        periods: {
-          where: {
-            end: { gte: agoraUTC.toJSDate() },   // só períodos ainda relevantes
-          }
+        where: whereCondition,
+        take: takeLimit, // Será 50 se paginando, ou undefined (todos) se na 1ª página ou com filtros.
+        orderBy: { id: "asc" },
+        include: {
+            periods: {
+                where: {
+                    end: { gte: agoraUTC.toJSDate() }, // só períodos ainda relevantes
+                }
+            }
         }
-      }
     });
-
-    // ==================================================
-    // 4) Função auxiliar: verificar conflito entre dois intervalos
-    // ==================================================
-    function intervaloConflita(startA: DateTime, endA: DateTime, startB: DateTime, endB: DateTime) {
-      return !(endA <= startB || startA >= endB);
-    }
-
-    // ==================================================
-    // 5) Funções auxiliares de conflito por tipo
-    // ==================================================
-
-    // --------------------------
-    // PEDIDO RECORRENTE × EXISTENTE RECORRENTE
-    // --------------------------
-    function conflitoRecorrenteComRecorrente(period: any, req: any) {
-      if (period.start.weekday !== req.diaSemana) return false;
-
-      const reqStartHM = req.inicio.toFormat("HH:mm");
-      const reqEndHM   = req.fim.toFormat("HH:mm");
-      const perStartHM = DateTime.fromJSDate(period.start).toUTC().toFormat("HH:mm");
-      const perEndHM   = DateTime.fromJSDate(period.end).toUTC().toFormat("HH:mm");
-
-      return !(reqEndHM <= perStartHM || reqStartHM >= perEndHM);
-    }
-
-    // --------------------------
-    // PEDIDO RECORRENTE × EXISTENTE PONTUAL
-    // --------------------------
-    function conflitoRecorrenteComPontual(period: any, req: any) {
-      const pStart = DateTime.fromJSDate(period.start).toUTC();
-      const pEnd   = DateTime.fromJSDate(period.end).toUTC();
-
-      if (pStart < agoraUTC) return false;             // ignora eventos já passados
-      if (pStart.weekday !== req.diaSemana) return false;
-
-      return intervaloConflita(req.inicio, req.fim, pStart, pEnd);
-    }
-
-    // --------------------------
-    // PEDIDO PONTUAL × EXISTENTE RECORRENTE
-    // --------------------------
-    function conflitoPontualComRecorrente(period: any, req: any) {
-      const pStart = DateTime.fromJSDate(period.start).toUTC();
-      const pEnd   = DateTime.fromJSDate(period.end).toUTC();
-
-      if (req.inicio < pStart) return false;  // recorrente só vale para datas >= primeiro start
-      if (req.diaSemana !== pStart.weekday) return false;
-
-      const recStartNaData = req.inicio.set({
-        hour: pStart.hour,
-        minute: pStart.minute,
-      });
-
-      const recEndNaData = req.inicio.set({
-        hour: pEnd.hour,
-        minute: pEnd.minute,
-      });
-
-      return intervaloConflita(req.inicio, req.fim, recStartNaData, recEndNaData);
-    }
-
-    // --------------------------
-    // PEDIDO PONTUAL × EXISTENTE PONTUAL
-    // --------------------------
-    function conflitoPontualComPontual(period: any, req: any) {
-      const pStart = DateTime.fromJSDate(period.start).toUTC();
-      const pEnd   = DateTime.fromJSDate(period.end).toUTC();
-      return intervaloConflita(req.inicio, req.fim, pStart, pEnd);
-    }
 
     // ==================================================
     // 6) Filtrar salas sem conflito
     // ==================================================
-    const salasDisponiveis = salas.filter(sala => {
+    let ultimoIdDaBusca = -1; // Usado para a próxima paginação (ID da última sala buscada no DB)
+    
+    const salasDisponiveis: any[] = [];
 
-      // Para CADA horário solicitado pelo usuário
-      return horariosReq.every((reqHorario: any) => {
+    for (const sala of salas) {
+    if (salasDisponiveis.length < 12) {
+        // Verifica se TODOS os horários solicitados estão livres nesta sala
+        const isAvailable = horariosReq.every((req: any) => {
+            
+            // Verifica se ALGUM período existente no banco conflita com o horário atual da requisição
+            const temConflito = sala.periods.some((dbPeriod: any) => {
+                return verificarConflitoUniversal(
+                    req.data,         // String 'YYYY-MM-DD' da requisição
+                    req.horaInicio,   // String 'HH:mm'
+                    req.horaFim,      // String 'HH:mm'
+                    recorrente,       // Boolean
+                    maxTimeRecorrente,// Number (meses)
+                    
+                    dbPeriod.start,   // Date do banco
+                    dbPeriod.end,     // Date | null do banco
+                    dbPeriod.isRecurring, // Boolean do banco
+                    dbPeriod.maxScheduleTime
+                );
+            });
 
-        const temConflito = sala.periods.some(period => {
-
-          if (recorrente) {
-            if (period.isRecurring) {
-              return conflitoRecorrenteComRecorrente(period, baseReq);
-            } else {
-              return conflitoRecorrenteComPontual(period, baseReq);
-            }
-          }
-
-          else {
-            if (period.isRecurring) {
-              return conflitoPontualComRecorrente(period, reqHorario);
-            } else {
-              return conflitoPontualComPontual(period, reqHorario);
-            }
-          }
-
+            return !temConflito; // Se NÃO tem conflito, está livre
         });
 
-        return !temConflito;
-      });
+            if (isAvailable) {
+                salasDisponiveis.push(sala);
+                ultimoIdDaBusca = sala.id;
+            }
+        } else {
+            break; // Já achamos 12 salas disponíveis, saímos do loop
+        }
+    }
 
-    });
 
     // ==================================================
     // 7) Retorno final
     // ==================================================
-    return res.status(200).json(
-      salasDisponiveis.map(s => ({
-        id: s.id,
-        nome: s.ID_Ambiente,
-        tipo: s.tipo ?? "",
-        ala: s.bloco,
-        status: s.active ? "active" : "inactive",
-      }))
-    );
+    const indiceDaUltimaSalaProcessada = salas.findIndex(sala => sala.id === ultimoIdDaBusca);
+
+    const temMaisSalas = ultimoIdDaBusca > -1  && salasDisponiveis.length === 12 && indiceDaUltimaSalaProcessada < (salas.length - 1);
+
+    return res.status(200).json({
+        salas: salasDisponiveis.map(s => ({
+            id: s.id,
+            nome: s.ID_Ambiente,
+            tipo: s.tipo ?? "",
+            ala: s.bloco,
+            status: s.active ? "active" : "inactive",
+        })),
+        meta: {
+            ultimoIdAchado: ultimoIdDaBusca,
+            temMaisSalas: temMaisSalas, 
+        }
+    });
 
   } catch (error) {
     console.error(error);
@@ -334,115 +185,121 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
 export const agendarSala = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    
+    // Validação Zod
     const body = AgendamentoSchema.parse(req.body);
-
     const { salaId, responsavel, horarios, recorrente, maxTimeRecorrente, userId } = body;
 
-    console.log("\n================= RECEBIDO DO FRONT =================");
-    console.log(JSON.stringify(body, null, 2));
-
-    // Verifica usuário autenticado
+    
+    // 1. Verifica usuário autenticado
     const usuarioLogado = await prisma.user.findUnique({
       where: { login: user.login }
     });
-    if (!usuarioLogado)
+
+    if (!usuarioLogado) {
       return res.status(401).json({ message: "Usuário não autenticado." });
+    }
 
     const TZ = "America/Sao_Paulo";
 
-    console.log("\n============= CONVERSÃO BR → UTC (TESTE) =============");
+    // 2. Buscar TODAS as reservas ativas desta sala para validar na memória
+    // Isso evita fazer N consultas dentro do loop e garante que pegamos recorrências
+    const reservasExistentes = await prisma.roomPeriod.findMany({
+      where: {
+        roomId: salaId,
+        // Otimização: Pegar recorrentes OU eventos futuros
+        OR: [
+            { isRecurring: true },
+            { end: { gte: new Date() } } 
+        ]
+      }
+    });
 
+    console.log(`\n🔎 Validando conflitos contra ${reservasExistentes.length} reservas existentes...`);
+
+    // 3. Loop de Validação (Memória)
     for (const { data, horaInicio, horaFim } of horarios) {
+      // Verifica este horário específico contra TODAS as reservas do banco
+      const temConflito = reservasExistentes.some((dbPeriod) => {
+        return verificarConflitoUniversal(
+          data,             // 'YYYY-MM-DD' do request
+          horaInicio,       // 'HH:mm'
+          horaFim,          // 'HH:mm'
+          recorrente,       // boolean
+          maxTimeRecorrente, // number (meses estimados)
 
-      const inicioUTC = DateTime
-        .fromISO(`${data}T${horaInicio}`, { zone: TZ })
-        .toUTC();
-
-      const fimUTC = DateTime
-        .fromISO(`${data}T${horaFim}`, { zone: TZ })
-        .toUTC();
-
-      console.log(`\nHorário solicitado:`);
-      console.log(`  BR:  ${data} ${horaInicio} → ${data} ${horaFim}`);
-      console.log(`  UTC: ${inicioUTC.toISO()} → ${fimUTC.toISO()}`);
-
-      // Verificar conflito
-      const conflito = await prisma.roomPeriod.findFirst({
-        where: {
-          roomId: salaId,
-          start: { lt: fimUTC.toJSDate() },
-          end: { gt: inicioUTC.toJSDate() }
-        }
+          dbPeriod.start,          // Date
+          dbPeriod.end,            // Date | null
+          dbPeriod.isRecurring,    // boolean
+          dbPeriod.maxScheduleTime // number | null (ou Date convertido, depende do seu prisma schema)
+        );
       });
 
-      if (conflito) {
-        console.log("⚠️ Conflito detectado:", conflito);
+      if (temConflito) {
+        console.log(`⚠️ Conflito detectado para: ${data} ${horaInicio}-${horaFim}`);
         return res.status(400).json({
-          message: "Horário indisponível. Buscar novamente",
+          message: `Conflito de horário detectado no dia ${data} (${horaInicio}-${horaFim}). Atualize a lista e tente novamente.`,
         });
       }
     }
 
+    // ==================================================
+    // 4. Preparar Dados para Salvar
+    // ==================================================
     const autoApproveConfig = await prisma.systemLog.findUnique({
       where: { key: "last_clear_update" }
     });
+    const autoApprove = autoApproveConfig?.autoApprove ?? false;
 
-    const autoApprove = autoApproveConfig?.autoApprove;
+    const donoReserva = usuarioLogado.hierarquia === "admin" ? userId : usuarioLogado.id;
+    const approved = usuarioLogado.hierarquia === "admin" ? true : autoApprove;
 
-    const donoReserva =
-      usuarioLogado.hierarquia === "admin" ? userId : usuarioLogado.id;
+    console.log("\n============= CRIANDO REGISTROS =============");
 
-    const approved =
-      usuarioLogado.hierarquia === "admin" ? true : autoApprove;
+    const registros = horarios.map(({ data, horaInicio, horaFim }: any) => {
+      const inicioUTC = DateTime.fromISO(`${data}T${horaInicio}`, { zone: TZ }).toUTC();
+      const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, { zone: TZ }).toUTC();
 
-    console.log("\n============= REGISTROS A SEREM SALVOS =============");
+      // 2. Calcula o Teto da Recorrência (maxScheduleTime) baseado na data DESTE item
+      let maxUTC = null;
 
-    const registros = horarios.map(({ data, horaInicio, horaFim }) => {
+      if (recorrente && typeof maxTimeRecorrente === 'number') {
+          // A mágica é aqui: Somamos X meses à data de início DESTE horário específico
+          maxUTC = inicioUTC
+              .plus({ months: maxTimeRecorrente })
+              .endOf('day') // Garante até o fim do dia daquele mês
+              .toUTC(); // Salva em UTC no banco
+      }
 
-      const inicioUTC = DateTime
-        .fromISO(`${data}T${horaInicio}`, { zone: TZ })
-        .toUTC();
-
-      const fimUTC = DateTime
-        .fromISO(`${data}T${horaFim}`, { zone: TZ })
-        .toUTC();
-
-      const maxUTC =
-        recorrente && maxTimeRecorrente
-          ? DateTime
-              .fromISO(`${maxTimeRecorrente}T23:59:59`, { zone: TZ })
-              .toUTC()
-          : null;
-
-      const registro = {
+      return {
         roomId: salaId,
         userId: donoReserva,
         nome: responsavel,
         start: inicioUTC.toJSDate(),
         end: fimUTC.toJSDate(),
         isRecurring: recorrente,
-        maxScheduleTime: maxUTC ? maxUTC.toJSDate() : null,
+        maxScheduleTime: maxUTC ? maxUTC.toJSDate() : null, 
         approved,
         createdAt: new Date(),
       };
-
-      console.log("Registro:", registro);
-
-      return registro;
     });
 
+    // 5. Salvar no Banco
     await prisma.roomPeriod.createMany({ data: registros });
 
-    console.log("\n✔️ SALVO NO BANCO COM SUCESSO!");
+    console.log("\n✔️ AGENDAMENTO SALVO COM SUCESSO!");
 
     return res.status(201).json({ message: "Agendamento criado com sucesso." });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro ao agendar sala:", error);
-    return res.status(400).json({ message: "Erro ao agendar sala." });
+    // Tratamento para erros do Zod
+    if (error.errors) {
+        return res.status(400).json({ message: "Dados inválidos", details: error.errors });
+    }
+    return res.status(500).json({ message: "Erro interno ao agendar sala." });
   }
 };
-
 
 // ===============================
 //  Listar minhas reservas
