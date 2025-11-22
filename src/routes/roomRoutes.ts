@@ -13,7 +13,7 @@ import { checkRoomUpdates } from '../middlewares/cache';
 const router = Router();
 
 router.post('/room',authenticateToken, createRoom);
-router.get('/rooms',authenticateToken,checkRoomUpdates, listRooms);
+router.get('/rooms',authenticateToken, listRooms);
 router.patch('/room/:id', editRoom);
 router.post('/rooms/delete', deleteRooms);
 router.get('/room/:roomId/Schedule',authenticateToken, getRoomSchedule)

@@ -22,7 +22,6 @@ model SystemLog {
   createdAt DateTime @default(now())
 }
 
-
 model User {
   id           Int       @id @default(autoincrement())
   login        String    @unique
@@ -31,7 +30,8 @@ model User {
   email        String?   @unique
   nome         String?   
 
-  hierarquia   Hierarquia @default(user)
+  hierarquia    Hierarquia @default(user)
+  especialidade  String    @default("any")
   lastLogin_at DateTime?
 
   createdAt    DateTime  @default(now())

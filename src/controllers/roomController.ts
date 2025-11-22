@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { debugLog } from '../auxiliar/debugLog';
 import { Prisma, RoomPeriod } from '@prisma/client';
 import { cancelAndArchivePeriods, checkActiveRoomConflicts, TransactionClient } from '../auxiliar/roomAuxi';
+import { equal } from 'assert';
 
 // ✅ Criação de sala
 export async function createRoom(req: Request, res: Response) {
@@ -58,8 +59,37 @@ export async function createRoom(req: Request, res: Response) {
 // ✅ Listar salas
 export async function listRooms(req: Request, res: Response) {
   try {
-    const rooms = await prisma.room.findMany();
+    const user = (req as any).user;
+    const usuarioLogado = await prisma.user.findUnique({ where: { id: user.userId } });
+
+    // Se não achar o usuário no banco, retorna erro (segurança)
+    if (!usuarioLogado) {
+        return res.status(401).json({ error: "Usuário não encontrado" });
+    }
+
+    let whereCondition: any = {};
+
+    // Se NÃO for admin, aplica as regras de negócio
+    if (usuarioLogado.hierarquia !== 'admin') {
+      
+      whereCondition.active = true;
+
+      // Se tiver especialidade definida e não for "any"
+      if (usuarioLogado.especialidade && usuarioLogado.especialidade.toLowerCase() !== 'any') {
+          whereCondition.OR = [
+              { tipo: { equals: 'Diferenciado', mode: 'insensitive' } }, 
+              // AJUSTE AQUI: Usando usuarioLogado em vez de user
+              { especialidade: { equals: usuarioLogado.especialidade, mode: 'insensitive' }}
+          ];
+      }
+    }
+
+    const rooms = await prisma.room.findMany({
+        where: whereCondition // Agora o filtro está sendo aplicado corretamente!
+    });
+    
     return res.status(200).json({ data: rooms });
+
   } catch (error) {
     console.error("Erro ao listar salas:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });

@@ -36,6 +36,7 @@ type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
     const { horarios, recorrente,maxTimeRecorrente, lastRoomId, numeroSala, bloco } = req.body;
 
     // ==================================================
@@ -49,6 +50,11 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     const TZ = "America/Sao_Paulo";
     const agoraUTC = DateTime.utc();
 
+    // 1. Verifica usuário autenticado
+    const usuarioLogado = await prisma.user.findUnique({
+      where: { login: user.login }
+    });
+    
     // ==================================================
     // 2) Converter horários da requisição → UTC
     // ==================================================
@@ -63,20 +69,18 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
       };
     });
 
-    // Para recorrência, só importa o primeiro horário
-    const baseReq = horariosReq[0];
-
-    // NOVO: Determina a data máxima de validade da recorrência pedida (se houver)
-    const maxRecurrenceEnd = recorrente
-        ? baseReq.inicio.plus({ months: maxTimeRecorrente })
-        : undefined;
-
     // ==================================================
     // 3) Buscar as salas, aplicando filtros e paginação
     // ==================================================
 
     let whereCondition: any = { active: true };
-    let takeLimit: number | undefined = undefined; // Por padrão, busca TUDO.
+
+    if ( usuarioLogado?.especialidade && usuarioLogado.especialidade.toLowerCase() !== 'any') {
+        whereCondition.OR = [
+            { tipo: { equals: 'Diferenciado', mode: 'insensitive' } }, 
+            { especialidade: { equals: user.especialidade, mode: 'insensitive' }}
+        ];
+    }
 
     // Checa se é uma busca filtrada (que sempre deve começar do ID 1)
     const isFilteredSearch = !!numeroSala || !!bloco;
@@ -100,7 +104,6 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     // A busca inicial no Prisma
     const salas = await prisma.room.findMany({
         where: whereCondition,
-        take: takeLimit, // Será 50 se paginando, ou undefined (todos) se na 1ª página ou com filtros.
         orderBy: { id: "asc" },
         include: {
             periods: {
@@ -150,8 +153,6 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
             break; // Já achamos 12 salas disponíveis, saímos do loop
         }
     }
-
-
     // ==================================================
     // 7) Retorno final
     // ==================================================
