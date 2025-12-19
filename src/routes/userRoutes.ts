@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { login, validateToken, logout, createUser, removeUser, getUsers, loginAnonimo } from '../controllers/userController';
+import { login, validateToken, logout, createUser, removeUser, getUsers, loginAnonimo, getMyProfile, updateProfile } from '../controllers/userController';
 import { authenticateToken, requireRole } from '../middlewares/authMiddleware';
 const router = Router();
 
@@ -12,5 +12,8 @@ router.get("/validate-token", authenticateToken, validateToken);
 router.get("/users",authenticateToken, requireRole(["admin"]),  getUsers);
 router.post("/users", authenticateToken, requireRole(["admin"]), createUser);
 router.delete("/users", authenticateToken, requireRole(["admin"]), removeUser);
+
+router.get('/my-profile', authenticateToken,requireRole(["user"]), getMyProfile);
+router.patch('/my-profile', authenticateToken,requireRole(["user"]), updateProfile);
 
 export default router;

@@ -9,4 +9,5 @@ router.get('/', authenticateToken, listScheduling);
 router.put('/:id', authenticateToken, updateScheduling)
 router.delete('/:id', authenticateToken, deleteScheduling)
 router.get('/statusnow/:ala', listCurrentRoomStatus)
+
 export default router;

@@ -189,10 +189,11 @@ export const agendarSala = async (req: Request, res: Response) => {
     
     // Validação Zod
     const body = AgendamentoSchema.parse(req.body);
-    const { salaId, responsavel, horarios, recorrente, maxTimeRecorrente, userId } = body;
+    // Removemos o userId daqui pois vamos calcular logicamente, mas se seu schema exige, deixe estar.
+    const { salaId, responsavel, horarios, recorrente, maxTimeRecorrente } = body; 
 
     
-    // 1. Verifica usuário autenticado
+    // 1. Verifica usuário autenticado (quem está fazendo a requisição)
     const usuarioLogado = await prisma.user.findUnique({
       where: { login: user.login }
     });
@@ -203,12 +204,10 @@ export const agendarSala = async (req: Request, res: Response) => {
 
     const TZ = "America/Sao_Paulo";
 
-    // 2. Buscar TODAS as reservas ativas desta sala para validar na memória
-    // Isso evita fazer N consultas dentro do loop e garante que pegamos recorrências
+    // 2. Buscar TODAS as reservas ativas desta sala (Lógica Mantida)
     const reservasExistentes = await prisma.roomPeriod.findMany({
       where: {
         roomId: salaId,
-        // Otimização: Pegar recorrentes OU eventos futuros
         OR: [
             { isRecurring: true },
             { end: { gte: new Date() } } 
@@ -216,28 +215,16 @@ export const agendarSala = async (req: Request, res: Response) => {
       }
     });
 
-    console.log(`\n🔎 Validando conflitos contra ${reservasExistentes.length} reservas existentes...`);
-
-    // 3. Loop de Validação (Memória)
+    // 3. Loop de Validação de Conflitos (Lógica Mantida)
     for (const { data, horaInicio, horaFim } of horarios) {
-      // Verifica este horário específico contra TODAS as reservas do banco
       const temConflito = reservasExistentes.some((dbPeriod) => {
         return verificarConflitoUniversal(
-          data,             // 'YYYY-MM-DD' do request
-          horaInicio,       // 'HH:mm'
-          horaFim,          // 'HH:mm'
-          recorrente,       // boolean
-          maxTimeRecorrente, // number (meses estimados)
-
-          dbPeriod.start,          // Date
-          dbPeriod.end,            // Date | null
-          dbPeriod.isRecurring,    // boolean
-          dbPeriod.maxScheduleTime // number | null (ou Date convertido, depende do seu prisma schema)
+          data, horaInicio, horaFim, recorrente, maxTimeRecorrente,
+          dbPeriod.start, dbPeriod.end, dbPeriod.isRecurring, dbPeriod.maxScheduleTime
         );
       });
 
       if (temConflito) {
-        console.log(`⚠️ Conflito detectado para: ${data} ${horaInicio}-${horaFim}`);
         return res.status(400).json({
           message: `Conflito de horário detectado no dia ${data} (${horaInicio}-${horaFim}). Atualize a lista e tente novamente.`,
         });
@@ -245,14 +232,41 @@ export const agendarSala = async (req: Request, res: Response) => {
     }
 
     // ==================================================
-    // 4. Preparar Dados para Salvar
+    // 4. Preparar Dados para Salvar (LÓGICA NOVA AQUI)
     // ==================================================
+    
     const autoApproveConfig = await prisma.systemLog.findUnique({
       where: { key: "last_clear_update" }
     });
     const autoApprove = autoApproveConfig?.autoApprove ?? false;
 
-    const donoReserva = usuarioLogado.hierarquia === "admin" ? userId : usuarioLogado.id;
+    // --- INÍCIO DA ALTERAÇÃO ---
+    let donoReserva = usuarioLogado.id; // Default: o próprio usuário logado
+
+    // Se for ADMIN, buscamos o usuário alvo pelo campo 'responsavel' (login)
+    if (usuarioLogado.hierarquia === "admin") {
+        if (responsavel) {
+            // Busca o usuário dono da reserva pelo login informado no campo responsavel
+            const usuarioAlvo = await prisma.user.findUnique({
+                where: { login: responsavel }
+            });
+
+            if (!usuarioAlvo) {
+                return res.status(404).json({ 
+                    message: `Admin: O usuário com login '${responsavel}' não foi encontrado no sistema.` 
+                });
+            }
+            
+            donoReserva = usuarioAlvo.id;
+        } else {
+            // Opcional: Se o admin não passar responsável, decide se dá erro ou se assume ele mesmo.
+            // Aqui estou assumindo ele mesmo caso venha vazio.
+            donoReserva = usuarioLogado.id; 
+        }
+    }
+    // Se for USER comum, a variável 'donoReserva' já é 'usuarioLogado.id' (definido acima)
+    // --- FIM DA ALTERAÇÃO ---
+
     const approved = usuarioLogado.hierarquia === "admin" ? true : autoApprove;
 
     console.log("\n============= CRIANDO REGISTROS =============");
@@ -261,21 +275,18 @@ export const agendarSala = async (req: Request, res: Response) => {
       const inicioUTC = DateTime.fromISO(`${data}T${horaInicio}`, { zone: TZ }).toUTC();
       const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, { zone: TZ }).toUTC();
 
-      // 2. Calcula o Teto da Recorrência (maxScheduleTime) baseado na data DESTE item
       let maxUTC = null;
-
       if (recorrente && typeof maxTimeRecorrente === 'number') {
-          // A mágica é aqui: Somamos X meses à data de início DESTE horário específico
           maxUTC = inicioUTC
               .plus({ months: maxTimeRecorrente })
-              .endOf('day') // Garante até o fim do dia daquele mês
-              .toUTC(); // Salva em UTC no banco
+              .endOf('day')
+              .toUTC();
       }
 
       return {
         roomId: salaId,
-        userId: donoReserva,
-        nome: responsavel,
+        userId: donoReserva, // Usa o ID calculado na nova lógica
+        nome: responsavel,   // Mantém o nome/login texto para visualização rápida
         start: inicioUTC.toJSDate(),
         end: fimUTC.toJSDate(),
         isRecurring: recorrente,
@@ -294,7 +305,6 @@ export const agendarSala = async (req: Request, res: Response) => {
 
   } catch (error: any) {
     console.error("Erro ao agendar sala:", error);
-    // Tratamento para erros do Zod
     if (error.errors) {
         return res.status(400).json({ message: "Dados inválidos", details: error.errors });
     }

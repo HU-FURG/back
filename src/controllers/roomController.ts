@@ -369,3 +369,96 @@ export async function getRoomSchedule(req: Request, res: Response) {
   }
 }
 
+export async function getBlockDayGrade(req: Request, res: Response) {
+  const userId = (req as any).user?.userId;
+  const { block, date } = req.params;
+
+  if (!userId) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  if (!block) {
+    return res.status(400).json({ message: "Bloco inválido." });
+  }
+
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return res.status(400).json({ message: "Data inválida. Use YYYY-MM-DD." });
+  }
+
+  try {
+    const startOfDay = new Date(`${date}T00:00:00.000Z`);
+    const endOfDay = new Date(`${date}T23:59:59.999Z`);
+
+    const userData = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { hierarquia: true },
+    });
+
+    const isAdmin = userData?.hierarquia === "admin";
+
+    // 🔹 Buscar todas as salas do bloco
+    const rooms = await prisma.room.findMany({
+      where: { bloco: block },
+    });
+
+    if (rooms.length === 0) {
+      return res.status(404).json({ message: "Nenhuma sala encontrada nesse bloco." });
+    }
+
+    // 🔹 Estrutura final agrupada por sala
+    const resultado: any[] = [];
+
+    // 🔹 Para cada sala, buscar SOMENTE as reservas dentro da data
+    for (const r of rooms) {
+      const reservas = await prisma.roomPeriod.findMany({
+        where: {
+          roomId: r.id,
+          start: { gte: startOfDay },
+          end: { lte: endOfDay }
+        },
+        orderBy: { start: "asc" },
+      });
+
+      // formatar horários
+      const horarios = reservas.map(res => {
+        const start = new Date(res.start);
+        const end = new Date(res.end);
+
+        return {
+          id: res.id,
+          startTime: start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+          endTime: end.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+          start: res.start,
+          end: res.end,
+          isRecurring: res.isRecurring,
+          approved: res.approved,
+          maxScheduleTime: res.maxScheduleTime,
+
+          ...(isAdmin && {
+            nome: res.nome,
+            userId: res.userId
+          })
+        };
+      });
+
+      // push na lista final
+      resultado.push({
+        roomId: r.id,
+        sala: r.ID_Ambiente,
+        horarios
+      });
+    }
+
+    return res.status(200).json({
+      block,
+      date,
+      salas: resultado
+    });
+
+  } catch (error) {
+    console.error(`Erro ao buscar agenda do bloco ${block}:`, error);
+    return res.status(500).json({
+      error: "Erro interno ao buscar a agenda.",
+    });
+  }
+}

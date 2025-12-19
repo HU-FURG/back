@@ -13,13 +13,13 @@ enum Hierarquia {
   user
 }
 
-model SystemLog {
-  id        Int      @id @default(autoincrement())
-  key       String   @unique
-  value     String?
+model SystemLog { //controle do sistema
+  id           Int      @id @default(autoincrement())
+  key          String   @unique
+  value        String?
   autoApprove  Boolean   @default(false)
-  updatedAt DateTime @updatedAt
-  createdAt DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  createdAt    DateTime @default(now())
 }
 
 model User {
@@ -29,26 +29,40 @@ model User {
 
   email        String?   @unique
   nome         String?   
+  descricao    String?
+  telefone     String?
 
-  hierarquia    Hierarquia @default(user)
-  especialidade  String    @default("any")
-  lastLogin_at DateTime?
+  hierarquia      Hierarquia @default(user)
+  especialidadeId Int?
+  lastLogin_at    DateTime?
 
-  createdAt    DateTime  @default(now())
-  active       Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  active          Boolean   @default(true)
 
-  // Relações
+  // Relações 
+  especialidade   Especialidade? @relation(fields: [especialidadeId], references: [id])
   roomPeriods           RoomPeriod[]
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
   histories             PeriodHistory[]
 }
 
+model Especialidade {
+  id    Int    @id @default(autoincrement())
+  nome  String @unique
+
+  // relações
+  users User[]
+  rooms Room[]
+}
+
 model Room {
   id            Int      @id @default(autoincrement())
   ID_Ambiente   String   @unique
   bloco         String
-  especialidade String
+  especialidadeId Int
+  
+
   tipo          String
   banheiro      Boolean
   ambiente      String
@@ -58,6 +72,7 @@ model Room {
   updatedAt     DateTime @updatedAt
 
   periods RoomPeriod[]
+  especialidade   Especialidade @relation(fields: [especialidadeId], references: [id])
 }
 
 model RoomPeriod {
@@ -140,6 +155,38 @@ model PeriodHistory {
   @@index([roomIdAmbiente, start])
   @@index([roomIdAmbiente, weekday, used])
 }
+
+// Esta tabela deve ser preenchida por um Cron Job no final do dia (ex: 23:59)
+model DailyRoomReport {
+  id             Int      @id @default(autoincrement())
+  
+  // Data de referência do relatório (ex: 2023-10-25T00:00:00.000Z)
+  date           DateTime 
+  generatedAt    DateTime @default(now())
+
+  // Identificação da sala (Snapshot - string para manter histórico mesmo se Room for deletada)
+  roomIdAmbiente String
+  roomBloco      String
+
+  // Verifica se a sala estava ativa no sistema neste dia
+  wasActive      Boolean
+  totalUsedMinutes   Int?   
+
+  // Minutos ociosos (Tempo total disponível no dia - Tempo usado)
+  // *O cálculo do tempo total disponível depende da sua regra de negócio (ex: 8h as 18h = 600min)*
+  totalUnusedMinutes Int?   
+
+  // Quantidade de agendamentos que foram cancelados ou não realizados neste dia
+  cancellationCount  Int?
+
+  // Lista JSON com nomes e IDs das pessoas que efetivamente usaram a sala no dia
+  // Formato sugerido: [{"nome": "Carlos", "userId": 1}, {"nome": "Maria", "userId": null}]
+  attendedUsersList  Json?
+
+  @@index([date])
+  @@index([roomIdAmbiente, date])
+}
+
 
 // guarda informações gerais de uso diario das salas pelo mês
 model RoomStats {

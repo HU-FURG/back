@@ -81,7 +81,7 @@ async function main() {
         await prisma.roomPeriod.create({
           data: {
             roomId: outraSala.id,
-            userId: user.id,
+            userId: 1,
             nome: user.nome || user.login,
             start,
             end,
@@ -95,7 +95,7 @@ async function main() {
         await prisma.roomPeriod.create({
           data: {
             roomId: sala.id,
-            userId: user.id,
+            userId: 1,
             nome: user.nome || user.login,
             start,
             end,
