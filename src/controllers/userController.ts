@@ -308,13 +308,26 @@ export async function removeUser(req: Request, res: Response) { //verificado
   }
 }
 
+const publicUserSelect = {
+  id: true,
+  login: true,
+  nome: true,
+  hierarquia: true,
+  especialidadeId: true,
+  telefone: true,
+  email: true,
+  lastLogin_at: true,
+  active: true,
+  descricao: true,
+};
+
 export async function getUsers(req: Request, res: Response) {// verificado {falta pages}
   try {
     console.log("📋 Buscando lista de usuários...");
 
     const users = await prisma.user.findMany({
       where: { hierarquia: { not: "admin" } },
-      select: { login: true, hierarquia: true, lastLogin_at: true, active: true },
+      select: { ...publicUserSelect },
     });
 
     console.log("✅ Usuários encontrados:", users);
@@ -341,7 +354,7 @@ export async function getMyProfile(req: Request, res: Response) {
       login: user.login,
       nome: user.nome,
       email: user.email,
-      especialidade: user.especialidade,
+      especialidade: user.especialidadeId,
       lastLogin_at: user.lastLogin_at
     });
   } catch (err) {

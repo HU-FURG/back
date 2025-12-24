@@ -403,7 +403,7 @@ async getGeneralStats(req: Request, res: Response) {
             id: room.id,
             ID_Ambiente: room.ID_Ambiente,
             bloco: room.bloco,
-            especialidade: room.especialidade,
+            especialidade: room.especialidadeId,
             tipo: room.tipo,
             banheiro: room.banheiro,
             usadoHoras: stat ? Math.round(stat.totalUsedMin / 60) : 0,

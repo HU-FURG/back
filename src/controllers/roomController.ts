@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { debugLog } from '../auxiliar/debugLog';
 import { Prisma, RoomPeriod } from '@prisma/client';
 import { cancelAndArchivePeriods, checkActiveRoomConflicts, TransactionClient } from '../auxiliar/roomAuxi';
-import { equal } from 'assert';
+
 
 // ✅ Criação de sala
 export async function createRoom(req: Request, res: Response) {
@@ -15,7 +15,7 @@ export async function createRoom(req: Request, res: Response) {
     banheiro: z.boolean(),
     ala: z.string(),
     ambiente: z.string(),
-    especialidade: z.string(),
+    especialidadeRoomId: z.number(),
     area: z.number(),
   });
 
@@ -33,6 +33,15 @@ export async function createRoom(req: Request, res: Response) {
       return res.status(409).json({ error: 'Já existe uma sala com esse ID_Ambiente.' });
     }
 
+    const especialidadeExists = await prisma.especialidadeRoom.findUnique({
+      where: { id: data.especialidadeRoomId },
+    })
+
+    if (!especialidadeExists) {
+      return res.status(400).json({ error: "Especialidade da sala inválida" })
+    }
+
+
     const room = await prisma.room.create({
       data: {
         ID_Ambiente: data.number,
@@ -40,7 +49,7 @@ export async function createRoom(req: Request, res: Response) {
         banheiro: data.banheiro,
         bloco: data.ala,
         ambiente: data.ambiente,
-        especialidade: data.especialidade,
+        especialidadeId: data.especialidadeRoomId,
         area: data.area,
       },
     });
@@ -59,47 +68,62 @@ export async function createRoom(req: Request, res: Response) {
 // ✅ Listar salas
 export async function listRooms(req: Request, res: Response) {
   try {
-    const user = (req as any).user;
-    const usuarioLogado = await prisma.user.findUnique({ where: { id: user.userId } });
+    const userAuth = (req as any).user
 
-    // Se não achar o usuário no banco, retorna erro (segurança)
-    if (!usuarioLogado) {
-        return res.status(401).json({ error: "Usuário não encontrado" });
+    const usuario = await prisma.user.findUnique({
+      where: { id: userAuth.userId },
+      include: {
+        especialidade: true,
+      },
+    })
+
+    if (!usuario) {
+      return res.status(401).json({ error: "Usuário não encontrado" })
     }
 
-    let whereCondition: any = {};
-
-    // Se NÃO for admin, aplica as regras de negócio
-    if (usuarioLogado.hierarquia !== 'admin') {
-      
-      whereCondition.active = true;
-
-      // Se tiver especialidade definida e não for "any"
-      if (usuarioLogado.especialidade && usuarioLogado.especialidade.toLowerCase() !== 'any') {
-          whereCondition.OR = [
-              { tipo: { equals: 'Diferenciado', mode: 'insensitive' } }, 
-              // AJUSTE AQUI: Usando usuarioLogado em vez de user
-              { especialidade: { equals: usuarioLogado.especialidade, mode: 'insensitive' }}
-          ];
-      }
+    // ADMIN vê tudo
+    if (usuario.hierarquia === "admin") {
+      const rooms = await prisma.room.findMany({
+        include: { especialidade: true },
+      })
+      return res.json({ data: rooms })
     }
 
     const rooms = await prisma.room.findMany({
-        where: whereCondition // Agora o filtro está sendo aplicado corretamente!
-    });
-    
-    return res.status(200).json({ data: rooms });
+      where: { active: true },
+      include: {
+        especialidade: true,
+      },
+    })
+
+    const especialidadeUser = usuario.especialidade?.nome
+
+    const salasFiltradas = rooms.filter((room) => {
+    if (room.tipo.toLowerCase() === "diferenciado") return true
+
+    const aceitas = room.especialidade?.especialidadesAceitas
+      ? JSON.parse(room.especialidade.especialidadesAceitas)
+      : []
+
+    if (aceitas.includes("any")) return true
+    if (!especialidadeUser) return false
+
+    return aceitas.includes(especialidadeUser)
+  })
+
+
+    return res.status(200).json({ data: salasFiltradas })
 
   } catch (error) {
-    console.error("Erro ao listar salas:", error);
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    console.error("Erro ao listar salas:", error)
+    return res.status(500).json({ error: "Erro interno do servidor" })
   }
 }
 
 // ✅ Editar sala
 export async function editRoom(req: Request, res: Response) {
   const schema = z.object({
-    especialidade: z.string().optional(),
+    especialidadeRoomId: z.number().optional(),
     ala: z.string().optional(),
     ambiente: z.string().optional(),
     banheiro: z.boolean().optional(),
@@ -119,11 +143,22 @@ export async function editRoom(req: Request, res: Response) {
       return res.status(404).json({ error: 'Sala não encontrada.' });
     }
 
+    if (data.especialidadeRoomId) {
+      const especialidadeExists = await prisma.especialidadeRoom.findUnique({
+        where: { id: data.especialidadeRoomId },
+      })
+
+      if (!especialidadeExists) {
+        return res.status(400).json({ error: "Especialidade da sala inválida" })
+      }
+    }
+
+
     const updatePayload = {
       tipo: data.tipo ?? existingRoom.tipo,
       bloco: data.ala ?? existingRoom.bloco, // "ala" do schema -> "bloco" no banco
       ambiente: data.ambiente ?? existingRoom.ambiente,
-      especialidade: data.especialidade ?? existingRoom.especialidade,
+      especialidadeId: data.especialidadeRoomId ?? existingRoom.especialidadeId,
       banheiro: data.banheiro ?? existingRoom.banheiro,
       active: data.active ?? existingRoom.active,
     };
@@ -273,27 +308,7 @@ export async function deleteRooms(req: Request, res: Response) {
   }
 }
 
-function getWeekRange(): { startOfWeek: Date; endOfWeek: Date } {
-    const now = new Date();
-    // Ajusta para o fuso horário local para evitar problemas de meia-noite
-    now.setHours(0, 0, 0, 0);
-
-    // Calcula o dia da semana (0 = Domingo, 1 = Segunda, ..., 6 = Sábado)
-    const dayOfWeek = now.getDay();
-
-    // Calcula início da semana (Segunda-feira)
-    const startOfWeek = new Date(now);
-    const daysToSubtract = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Se domingo, volta 6 dias
-    startOfWeek.setDate(now.getDate() - daysToSubtract);
-
-    // Calcula fim da semana (Sábado à meia-noite)
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    endOfWeek.setHours(23, 59, 59, 999);
-
-    return { startOfWeek, endOfWeek };
-}
-
+// ✅ Obter agenda de uma sala
 export async function getRoomSchedule(req: Request, res: Response) {
   const userId = (req as any).user?.userId;
   const { roomId } = req.params;
@@ -369,6 +384,7 @@ export async function getRoomSchedule(req: Request, res: Response) {
   }
 }
 
+// ✅ Obter agenda de um bloco em um dia específico
 export async function getBlockDayGrade(req: Request, res: Response) {
   const userId = (req as any).user?.userId;
   const { block, date } = req.params;

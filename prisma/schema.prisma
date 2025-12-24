@@ -4,8 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url  	    = env("DATABASE_URL")
 }
 
 enum Hierarquia {
@@ -40,19 +40,27 @@ model User {
   active          Boolean   @default(true)
 
   // Relações 
-  especialidade   Especialidade? @relation(fields: [especialidadeId], references: [id])
+  especialidade   EspecialidadeUser? @relation(fields: [especialidadeId], references: [id])
   roomPeriods           RoomPeriod[]
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
   histories             PeriodHistory[]
 }
 
-model Especialidade {
+model EspecialidadeUser {
   id    Int    @id @default(autoincrement())
   nome  String @unique
 
   // relações
   users User[]
+}
+
+model EspecialidadeRoom {
+  id    Int    @id @default(autoincrement())
+  nome  String @unique
+  especialidadesAceitas String?
+
+  // relações
   rooms Room[]
 }
 
@@ -72,7 +80,7 @@ model Room {
   updatedAt     DateTime @updatedAt
 
   periods RoomPeriod[]
-  especialidade   Especialidade @relation(fields: [especialidadeId], references: [id])
+  especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 }
 
 model RoomPeriod {

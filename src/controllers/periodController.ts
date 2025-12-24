@@ -48,13 +48,14 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     }
 
     const TZ = "America/Sao_Paulo";
-    const agoraUTC = DateTime.utc();
+    const agoraUTC = DateTime.now().setZone(TZ).toUTC();
+
 
     // 1. Verifica usuário autenticado
     const usuarioLogado = await prisma.user.findUnique({
-      where: { login: user.login }
+      where: { id: user.userId },
     });
-    
+
     // ==================================================
     // 2) Converter horários da requisição → UTC
     // ==================================================
@@ -73,14 +74,7 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     // 3) Buscar as salas, aplicando filtros e paginação
     // ==================================================
 
-    let whereCondition: any = { active: true };
-
-    if ( usuarioLogado?.especialidade && usuarioLogado.especialidade.toLowerCase() !== 'any') {
-        whereCondition.OR = [
-            { tipo: { equals: 'Diferenciado', mode: 'insensitive' } }, 
-            { especialidade: { equals: user.especialidade, mode: 'insensitive' }}
-        ];
-    }
+    let whereCondition: any = { active: true }
 
     // Checa se é uma busca filtrada (que sempre deve começar do ID 1)
     const isFilteredSearch = !!numeroSala || !!bloco;
@@ -195,8 +189,9 @@ export const agendarSala = async (req: Request, res: Response) => {
     
     // 1. Verifica usuário autenticado (quem está fazendo a requisição)
     const usuarioLogado = await prisma.user.findUnique({
-      where: { login: user.login }
+      where: { id: user.userId },
     });
+
 
     if (!usuarioLogado) {
       return res.status(401).json({ message: "Usuário não autenticado." });

@@ -12,6 +12,7 @@ export const clearPeriodsandUpdate = async () => {
   const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
 
   try {
+    // Inicia uma transação para garantir a consistência dos dados
     const expiredPeriods = await prisma.$transaction(async (tx) => {
       const periods = await tx.roomPeriod.findMany({
         where: { end: { lt: agora } },
@@ -31,12 +32,21 @@ export const clearPeriodsandUpdate = async () => {
       const historyData: Prisma.PeriodHistoryCreateManyInput[] = [];
       const templateData: Prisma.RoomScheduleTemplateCreateManyInput[] = [];
 
+      // Processa cada período expirado
       for (const period of periods) {
         const { room, user } = period;
         const roomIdAmbiente = room.ID_Ambiente;
         const roomBloco = room.bloco;
         const userId = user?.id ?? null;
         const duration = durationInMinutes(period.start, period.end);
+
+        const nextStart = new Date(period.start.getTime() + sevenDaysInMs);
+        const nextEnd = new Date(period.end.getTime() + sevenDaysInMs);
+
+        const exceededLimit =
+          period.isRecurring &&
+          period.maxScheduleTime &&
+          nextStart > period.maxScheduleTime;
 
         historyData.push({
           roomIdAmbiente,
@@ -54,19 +64,39 @@ export const clearPeriodsandUpdate = async () => {
           archivedAt: new Date(),
         });
 
-        templateData.push({
-          userId,
-          nome: period.nome,
-          durationInMinutes: duration,
-          roomIdAmbiente,
-          roomBloco,
-          originalStart: period.start,
-          originalEnd: period.end,
-          reason: "Vencido",
-        });
+        if(!period.isRecurring) {
+          templateData.push({
+            userId,
+            nome: period.nome,
+            durationInMinutes: duration,
+            roomIdAmbiente,
+            roomBloco,
+            originalStart: period.start,
+            originalEnd: period.end,
+            reason: "Vencido",
+          });
+        }
 
-        if (period.isRecurring) recurrentToUpdate.push(period);
-        else nonRecurrentToDeleteIds.push(period.id);
+        // 🔄 recorrente ainda válido remarcar ou não
+        if (period.isRecurring && !exceededLimit) {
+          recurrentToUpdate.push(period);
+        } else {
+          // ❌ encerrou (não recorrente OU recorrente que estourou limite)
+          nonRecurrentToDeleteIds.push(period.id);
+
+          templateData.push({
+            userId,
+            nome: period.nome,
+            durationInMinutes: duration,
+            roomIdAmbiente,
+            roomBloco,
+            originalStart: period.start,
+            originalEnd: period.end,
+            reason: period.isRecurring
+              ? "Limite de recorrência atingido"
+              : "Vencido",
+          });
+        }
       }
 
       if (historyData.length > 0)
@@ -81,9 +111,10 @@ export const clearPeriodsandUpdate = async () => {
       return recurrentToUpdate;
     });
 
+    // Atualiza os períodos recorrentes em chunks para evitar sobrecarga
     if (expiredPeriods.length > 0) {
       const chunkSize = 50;
-      const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
+      
       for (let i = 0; i < expiredPeriods.length; i += chunkSize) {
         const chunk = expiredPeriods.slice(i, i + chunkSize);
         await Promise.all(

@@ -6,6 +6,7 @@ CREATE TABLE "public"."SystemLog" (
     "id" SERIAL NOT NULL,
     "key" TEXT NOT NULL,
     "value" TEXT,
+    "autoApprove" BOOLEAN NOT NULL DEFAULT false,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -19,13 +20,32 @@ CREATE TABLE "public"."User" (
     "senha" TEXT NOT NULL,
     "email" TEXT,
     "nome" TEXT,
+    "descricao" TEXT,
+    "telefone" TEXT,
     "hierarquia" "public"."Hierarquia" NOT NULL DEFAULT 'user',
+    "especialidadeId" INTEGER,
     "lastLogin_at" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "autoApprove" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."EspecialidadeUser" (
+    "id" SERIAL NOT NULL,
+    "nome" TEXT NOT NULL,
+
+    CONSTRAINT "EspecialidadeUser_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "public"."EspecialidadeRoom" (
+    "id" SERIAL NOT NULL,
+    "nome" TEXT NOT NULL,
+    "especialidadesAceitas" TEXT,
+
+    CONSTRAINT "EspecialidadeRoom_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -33,7 +53,7 @@ CREATE TABLE "public"."Room" (
     "id" SERIAL NOT NULL,
     "ID_Ambiente" TEXT NOT NULL,
     "bloco" TEXT NOT NULL,
-    "especialidade" TEXT NOT NULL,
+    "especialidadeId" INTEGER NOT NULL,
     "tipo" TEXT NOT NULL,
     "banheiro" BOOLEAN NOT NULL,
     "ambiente" TEXT NOT NULL,
@@ -99,6 +119,22 @@ CREATE TABLE "public"."PeriodHistory" (
 );
 
 -- CreateTable
+CREATE TABLE "public"."DailyRoomReport" (
+    "id" SERIAL NOT NULL,
+    "date" TIMESTAMP(3) NOT NULL,
+    "generatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "roomIdAmbiente" TEXT NOT NULL,
+    "roomBloco" TEXT NOT NULL,
+    "wasActive" BOOLEAN NOT NULL,
+    "totalUsedMinutes" INTEGER,
+    "totalUnusedMinutes" INTEGER,
+    "cancellationCount" INTEGER,
+    "attendedUsersList" JSONB,
+
+    CONSTRAINT "DailyRoomReport_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "public"."RoomStats" (
     "id" SERIAL NOT NULL,
     "roomIdAmbiente" TEXT NOT NULL,
@@ -141,6 +177,12 @@ CREATE UNIQUE INDEX "User_login_key" ON "public"."User"("login");
 CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "EspecialidadeUser_nome_key" ON "public"."EspecialidadeUser"("nome");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "EspecialidadeRoom_nome_key" ON "public"."EspecialidadeRoom"("nome");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Room_ID_Ambiente_key" ON "public"."Room"("ID_Ambiente");
 
 -- CreateIndex
@@ -165,7 +207,19 @@ CREATE INDEX "PeriodHistory_roomIdAmbiente_start_idx" ON "public"."PeriodHistory
 CREATE INDEX "PeriodHistory_roomIdAmbiente_weekday_used_idx" ON "public"."PeriodHistory"("roomIdAmbiente", "weekday", "used");
 
 -- CreateIndex
+CREATE INDEX "DailyRoomReport_date_idx" ON "public"."DailyRoomReport"("date");
+
+-- CreateIndex
+CREATE INDEX "DailyRoomReport_roomIdAmbiente_date_idx" ON "public"."DailyRoomReport"("roomIdAmbiente", "date");
+
+-- CreateIndex
 CREATE INDEX "RoomStats_roomIdAmbiente_monthRef_idx" ON "public"."RoomStats"("roomIdAmbiente", "monthRef");
+
+-- AddForeignKey
+ALTER TABLE "public"."User" ADD CONSTRAINT "User_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "public"."EspecialidadeUser"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "public"."Room" ADD CONSTRAINT "Room_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "public"."EspecialidadeRoom"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "public"."Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

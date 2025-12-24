@@ -14,52 +14,64 @@ function normalizeEspecialidade(value: string): string {
     .trim()
 }
 
-async function main() {
-  // 1️⃣ Lê e insere as salas do CSV
-  const csvPath = path.join(__dirname, "lista.csv");
-  const fileContent = fs.readFileSync(csvPath, "utf-8");
-
-  console.log("delete todos")
-
-
-  // await prisma.roomPeriod.deleteMany({where:{userId: 1}})
-  // await prisma.user.deleteMany({where: {NOT: {id: 1}}})
-  
-  const especialidades = await prisma.especialidade.findMany({
-    select: {
-      id: true,
-      nome: true,
-    },
+async function loadEspecialidadeUserMap() {
+  const especialidades = await prisma.especialidadeUser.findMany({
+    select: { id: true, nome: true },
   })
 
-  const especialidadeMap = new Map<string, number>()
-
+  const map = new Map<string, number>()
   especialidades.forEach((e) => {
-    especialidadeMap.set(normalizeEspecialidade(e.nome), e.id)
+    map.set(normalizeEspecialidade(e.nome), e.id)
   })
 
-  const records: any[] = [];
-  await new Promise<void>((resolve, reject) => {
-      parse(fileContent, {
-        columns: true,
-        skip_empty_lines: true,
-        delimiter: ",", // ajuste se for ";" no CSV
-        trim: true,
-      })
-        .on("data", (row) => records.push(row))
-        .on("end", () => resolve())
-        .on("error", (err) => reject(err));
-    });
+  return map
+}
 
-    const salasData = records.map((sala) => {
+async function loadEspecialidadeSalaMap() {
+  const especialidades = await prisma.especialidadeRoom.findMany({
+    select: { id: true, nome: true },
+  })
+
+  const map = new Map<string, number>()
+  especialidades.forEach((e) => {
+    map.set(normalizeEspecialidade(e.nome), e.id)
+  })
+
+  return map
+}
+
+
+async function main() {
+  // ===============================
+  // 🏥 SALAS
+  // ===============================
+  const csvPathSala = path.join(__dirname, "lista.csv")
+  const fileContentSala = fs.readFileSync(csvPathSala, "utf-8")
+
+  const especialidadeSalaMap = await loadEspecialidadeSalaMap()
+
+  const salasRecords: any[] = []
+  await new Promise<void>((resolve, reject) => {
+    parse(fileContentSala, {
+      columns: true,
+      skip_empty_lines: true,
+      delimiter: ",",
+      trim: true,
+    })
+      .on("data", (row) => salasRecords.push(row))
+      .on("end", resolve)
+      .on("error", reject)
+  })
+
+  const salasData = salasRecords.map((sala) => {
     const especialidadeNome = normalizeEspecialidade(sala.ESPECIALIDADE)
 
     const especialidadeId =
-      especialidadeMap.get(especialidadeNome) ??
-      especialidadeMap.get("any")
+      especialidadeSalaMap.get(especialidadeNome) ??
+      especialidadeSalaMap.get("cid")
 
     if (!especialidadeId) {
-      throw new Error(`Especialidade não encontrada: ${sala.ESPECIALIDADE}`)
+      throw new Error(`Especialidade de sala não encontrada: ${sala.ESPECIALIDADE}`)
     }
 
     return {
@@ -67,69 +79,76 @@ async function main() {
       bloco: sala.BLOCO,
       especialidadeId,
       tipo: sala.TIPO,
-      banheiro: sala.BANHEIRO.toUpperCase() === "SIM",
+      banheiro: sala.BANHEIRO?.toUpperCase() === "SIM",
       ambiente: sala.AMBIENTE,
-      area: parseFloat(sala.ÁREA.replace(",", ".")),
+      area: parseFloat(sala["ÁREA"].replace(",", ".")),
       active: true,
     }
   })
 
-
   await prisma.room.createMany({
     data: salasData,
-    skipDuplicates: true, 
-  });
+    skipDuplicates: true,
+  })
 
-  console.log(`${salasData.length} salas criadas!`);
-  const hashedPassword = await bcrypt.hash("1234", 10);
-  
+  console.log(`✅ ${salasData.length} salas criadas`)
+
   // ===============================
-// 👤 CRIAR USUÁRIOS A PARTIR DO CSV
-// ===============================
+  // 👤 USUÁRIOS
+  // ===============================
+  const csvPathUser = path.join(__dirname, "pro.csv")
+  const fileContentUser = fs.readFileSync(csvPathUser, "utf-8")
 
-const csvPathUser = path.join(__dirname, "pro.csv");
-const fileContentUser = fs.readFileSync(csvPathUser, "utf-8");
+  const especialidadeUserMap = await loadEspecialidadeUserMap()
 
-const recordsUser: any[] = [];
+  const hashedPassword = await bcrypt.hash("1234", 10)
+
+  const usersRecords: any[] = []
   await new Promise<void>((resolve, reject) => {
-      parse(fileContentUser, {
-        columns: true,
-        skip_empty_lines: true,
-        delimiter: ",", // ajuste se for ";" no CSV
-        trim: true,
-      })
-        .on("data", (row) => recordsUser.push(row))
-        .on("end", () => resolve())
-        .on("error", (err) => reject(err));
-    });
+    parse(fileContentUser, {
+      columns: true,
+      skip_empty_lines: true,
+      delimiter: ",",
+      trim: true,
+    })
+      .on("data", (row) => usersRecords.push(row))
+      .on("end", resolve)
+      .on("error", reject)
+  })
 
-const usuariosData = recordsUser.map((row) => {
-  const especialidadeNome = normalizeEspecialidade(row.especialidade)
+  const usuariosData = usersRecords.map((row) => {
+    const especialidadeNome = normalizeEspecialidade(row.especialidade)
 
-  const especialidadeId =
-    especialidadeMap.get(especialidadeNome) ??
-    especialidadeMap.get("any")
+    const especialidadeId =
+      especialidadeUserMap.get(especialidadeNome) ??
+      especialidadeUserMap.get("any")
 
-  if (!especialidadeId) {
-    throw new Error(`Especialidade inválida no CSV: ${row.especialidade}`)
-  }
-  const userlogin = row.profissional.toLowerCase().replace(/\s+/g, ".");
-  return {
-    login: userlogin,
-    senha: hashedPassword,
-    hierarquia: Hierarquia.user,
-    nome: row.profissional,
-    descricao: row.ocupação,
-    especialidadeId,
-  }
-})
+    if (!especialidadeId) {
+      throw new Error(`Especialidade inválida no CSV: ${row.especialidade}`)
+    }
 
-await prisma.user.createMany({
-  data: usuariosData,
-  skipDuplicates: true,
-})
+    const login = row.profissional
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\s+/g, ".")
 
-console.log(`✅ ${usuariosData.length} usuários criados a partir do CSV`)
+    return {
+      login,
+      senha: hashedPassword,
+      hierarquia: Hierarquia.user,
+      nome: row.profissional,
+      descricao: row.ocupação,
+      especialidadeId,
+    }
+  })
+
+  await prisma.user.createMany({
+    data: usuariosData,
+    skipDuplicates: true,
+  })
+
+  console.log(`✅ ${usuariosData.length} usuários criados`)
 }
 
 main()
