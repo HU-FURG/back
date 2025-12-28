@@ -17,7 +17,12 @@ export const clearPeriodsandUpdate = async () => {
       const periods = await tx.roomPeriod.findMany({
         where: { end: { lt: agora } },
         include: {
-          room: { select: { ID_Ambiente: true, bloco: true } },
+          room: {
+            select: {
+              ID_Ambiente: true,
+              bloco: { select: { id: true, nome: true } },
+            },
+          },
           user: { select: { id: true, login: true } },
         },
       });
@@ -36,7 +41,8 @@ export const clearPeriodsandUpdate = async () => {
       for (const period of periods) {
         const { room, user } = period;
         const roomIdAmbiente = room.ID_Ambiente;
-        const roomBloco = room.bloco;
+        const roomBloco = `${room.bloco.id}`;
+        const roomBlocoNome = `${room.bloco.nome}`;
         const userId = user?.id ?? null;
         const duration = durationInMinutes(period.start, period.end);
 
@@ -50,7 +56,7 @@ export const clearPeriodsandUpdate = async () => {
 
         historyData.push({
           roomIdAmbiente,
-          roomBloco,
+          roomBloco: roomBlocoNome,
           userId,
           start: period.start,
           end: period.end,

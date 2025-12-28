@@ -1,8 +1,8 @@
 -- CreateEnum
-CREATE TYPE "public"."Hierarquia" AS ENUM ('admin', 'user');
+CREATE TYPE "Hierarquia" AS ENUM ('admin', 'user');
 
 -- CreateTable
-CREATE TABLE "public"."SystemLog" (
+CREATE TABLE "SystemLog" (
     "id" SERIAL NOT NULL,
     "key" TEXT NOT NULL,
     "value" TEXT,
@@ -14,7 +14,7 @@ CREATE TABLE "public"."SystemLog" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."User" (
+CREATE TABLE "User" (
     "id" SERIAL NOT NULL,
     "login" TEXT NOT NULL,
     "senha" TEXT NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE "public"."User" (
     "nome" TEXT,
     "descricao" TEXT,
     "telefone" TEXT,
-    "hierarquia" "public"."Hierarquia" NOT NULL DEFAULT 'user',
+    "hierarquia" "Hierarquia" NOT NULL DEFAULT 'user',
     "especialidadeId" INTEGER,
     "lastLogin_at" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -32,7 +32,7 @@ CREATE TABLE "public"."User" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."EspecialidadeUser" (
+CREATE TABLE "EspecialidadeUser" (
     "id" SERIAL NOT NULL,
     "nome" TEXT NOT NULL,
 
@@ -40,7 +40,7 @@ CREATE TABLE "public"."EspecialidadeUser" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."EspecialidadeRoom" (
+CREATE TABLE "EspecialidadeRoom" (
     "id" SERIAL NOT NULL,
     "nome" TEXT NOT NULL,
     "especialidadesAceitas" TEXT,
@@ -49,10 +49,18 @@ CREATE TABLE "public"."EspecialidadeRoom" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."Room" (
+CREATE TABLE "BlocoRoom" (
+    "id" SERIAL NOT NULL,
+    "nome" TEXT NOT NULL,
+
+    CONSTRAINT "BlocoRoom_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Room" (
     "id" SERIAL NOT NULL,
     "ID_Ambiente" TEXT NOT NULL,
-    "bloco" TEXT NOT NULL,
+    "blocoId" INTEGER NOT NULL,
     "especialidadeId" INTEGER NOT NULL,
     "tipo" TEXT NOT NULL,
     "banheiro" BOOLEAN NOT NULL,
@@ -66,7 +74,7 @@ CREATE TABLE "public"."Room" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."RoomPeriod" (
+CREATE TABLE "RoomPeriod" (
     "id" SERIAL NOT NULL,
     "roomId" INTEGER NOT NULL,
     "userId" INTEGER,
@@ -83,7 +91,7 @@ CREATE TABLE "public"."RoomPeriod" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."RoomScheduleTemplate" (
+CREATE TABLE "RoomScheduleTemplate" (
     "id" SERIAL NOT NULL,
     "userId" INTEGER,
     "nome" TEXT NOT NULL,
@@ -99,7 +107,7 @@ CREATE TABLE "public"."RoomScheduleTemplate" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."PeriodHistory" (
+CREATE TABLE "PeriodHistory" (
     "id" SERIAL NOT NULL,
     "roomIdAmbiente" TEXT NOT NULL,
     "roomBloco" TEXT NOT NULL,
@@ -119,7 +127,7 @@ CREATE TABLE "public"."PeriodHistory" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."DailyRoomReport" (
+CREATE TABLE "DailyRoomReport" (
     "id" SERIAL NOT NULL,
     "date" TIMESTAMP(3) NOT NULL,
     "generatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -135,7 +143,7 @@ CREATE TABLE "public"."DailyRoomReport" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."RoomStats" (
+CREATE TABLE "RoomStats" (
     "id" SERIAL NOT NULL,
     "roomIdAmbiente" TEXT NOT NULL,
     "roomBloco" TEXT NOT NULL,
@@ -155,7 +163,7 @@ CREATE TABLE "public"."RoomStats" (
 );
 
 -- CreateTable
-CREATE TABLE "public"."Notification" (
+CREATE TABLE "Notification" (
     "id" SERIAL NOT NULL,
     "userId" INTEGER NOT NULL,
     "message" TEXT NOT NULL,
@@ -168,70 +176,76 @@ CREATE TABLE "public"."Notification" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX "SystemLog_key_key" ON "public"."SystemLog"("key");
+CREATE UNIQUE INDEX "SystemLog_key_key" ON "SystemLog"("key");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_login_key" ON "public"."User"("login");
+CREATE UNIQUE INDEX "User_login_key" ON "User"("login");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "public"."User"("email");
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EspecialidadeUser_nome_key" ON "public"."EspecialidadeUser"("nome");
+CREATE UNIQUE INDEX "EspecialidadeUser_nome_key" ON "EspecialidadeUser"("nome");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "EspecialidadeRoom_nome_key" ON "public"."EspecialidadeRoom"("nome");
+CREATE UNIQUE INDEX "EspecialidadeRoom_nome_key" ON "EspecialidadeRoom"("nome");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Room_ID_Ambiente_key" ON "public"."Room"("ID_Ambiente");
+CREATE UNIQUE INDEX "BlocoRoom_nome_key" ON "BlocoRoom"("nome");
 
 -- CreateIndex
-CREATE INDEX "RoomPeriod_roomId_start_idx" ON "public"."RoomPeriod"("roomId", "start");
+CREATE UNIQUE INDEX "Room_ID_Ambiente_key" ON "Room"("ID_Ambiente");
 
 -- CreateIndex
-CREATE INDEX "RoomPeriod_roomId_end_idx" ON "public"."RoomPeriod"("roomId", "end");
+CREATE INDEX "RoomPeriod_roomId_start_idx" ON "RoomPeriod"("roomId", "start");
 
 -- CreateIndex
-CREATE INDEX "RoomPeriod_userId_idx" ON "public"."RoomPeriod"("userId");
+CREATE INDEX "RoomPeriod_roomId_end_idx" ON "RoomPeriod"("roomId", "end");
 
 -- CreateIndex
-CREATE INDEX "PeriodHistory_roomIdAmbiente_idx" ON "public"."PeriodHistory"("roomIdAmbiente");
+CREATE INDEX "RoomPeriod_userId_idx" ON "RoomPeriod"("userId");
 
 -- CreateIndex
-CREATE INDEX "PeriodHistory_weekday_idx" ON "public"."PeriodHistory"("weekday");
+CREATE INDEX "PeriodHistory_roomIdAmbiente_idx" ON "PeriodHistory"("roomIdAmbiente");
 
 -- CreateIndex
-CREATE INDEX "PeriodHistory_roomIdAmbiente_start_idx" ON "public"."PeriodHistory"("roomIdAmbiente", "start");
+CREATE INDEX "PeriodHistory_weekday_idx" ON "PeriodHistory"("weekday");
 
 -- CreateIndex
-CREATE INDEX "PeriodHistory_roomIdAmbiente_weekday_used_idx" ON "public"."PeriodHistory"("roomIdAmbiente", "weekday", "used");
+CREATE INDEX "PeriodHistory_roomIdAmbiente_start_idx" ON "PeriodHistory"("roomIdAmbiente", "start");
 
 -- CreateIndex
-CREATE INDEX "DailyRoomReport_date_idx" ON "public"."DailyRoomReport"("date");
+CREATE INDEX "PeriodHistory_roomIdAmbiente_weekday_used_idx" ON "PeriodHistory"("roomIdAmbiente", "weekday", "used");
 
 -- CreateIndex
-CREATE INDEX "DailyRoomReport_roomIdAmbiente_date_idx" ON "public"."DailyRoomReport"("roomIdAmbiente", "date");
+CREATE INDEX "DailyRoomReport_date_idx" ON "DailyRoomReport"("date");
 
 -- CreateIndex
-CREATE INDEX "RoomStats_roomIdAmbiente_monthRef_idx" ON "public"."RoomStats"("roomIdAmbiente", "monthRef");
+CREATE INDEX "DailyRoomReport_roomIdAmbiente_date_idx" ON "DailyRoomReport"("roomIdAmbiente", "date");
+
+-- CreateIndex
+CREATE INDEX "RoomStats_roomIdAmbiente_monthRef_idx" ON "RoomStats"("roomIdAmbiente", "monthRef");
 
 -- AddForeignKey
-ALTER TABLE "public"."User" ADD CONSTRAINT "User_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "public"."EspecialidadeUser"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "User" ADD CONSTRAINT "User_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "EspecialidadeUser"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Room" ADD CONSTRAINT "Room_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "public"."EspecialidadeRoom"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Room" ADD CONSTRAINT "Room_blocoId_fkey" FOREIGN KEY ("blocoId") REFERENCES "BlocoRoom"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "public"."Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "Room" ADD CONSTRAINT "Room_especialidadeId_fkey" FOREIGN KEY ("especialidadeId") REFERENCES "EspecialidadeRoom"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."RoomPeriod" ADD CONSTRAINT "RoomPeriod_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RoomPeriod" ADD CONSTRAINT "RoomPeriod_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."RoomScheduleTemplate" ADD CONSTRAINT "RoomScheduleTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RoomPeriod" ADD CONSTRAINT "RoomPeriod_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."PeriodHistory" ADD CONSTRAINT "PeriodHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "RoomScheduleTemplate" ADD CONSTRAINT "RoomScheduleTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "public"."Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "public"."User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "PeriodHistory" ADD CONSTRAINT "PeriodHistory_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

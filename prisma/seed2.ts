@@ -6,6 +6,15 @@ import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
+function normalizeBloco(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+}
+
+
 function normalizeEspecialidade(value: string): string {
   return value
     .toLowerCase()
@@ -39,59 +48,106 @@ async function loadEspecialidadeSalaMap() {
 
   return map
 }
+async function loadBlocoSalaMap() {
+  const blocos = await prisma.blocoRoom.findMany({
+    select: { id: true, nome: true },
+  })
+
+  const map = new Map<string, number>()
+  blocos.forEach((b) => {
+    map.set(normalizeBloco(b.nome), b.id)
+  })
+
+  return map
+}
+
 
 
 async function main() {
   // ===============================
   // 🏥 SALAS
   // ===============================
-  const csvPathSala = path.join(__dirname, "lista.csv")
-  const fileContentSala = fs.readFileSync(csvPathSala, "utf-8")
+ // ===============================
+// 🏥 SALAS
+// ===============================
+const csvPathSala = path.join(__dirname, "lista.csv")
+const fileContentSala = fs.readFileSync(csvPathSala, "utf-8")
 
-  const especialidadeSalaMap = await loadEspecialidadeSalaMap()
+const especialidadeSalaMap = await loadEspecialidadeSalaMap()
+const blocoSalaMap = await loadBlocoSalaMap()
 
-  const salasRecords: any[] = []
-  await new Promise<void>((resolve, reject) => {
-    parse(fileContentSala, {
-      columns: true,
-      skip_empty_lines: true,
-      delimiter: ",",
-      trim: true,
+const salasRecords: any[] = []
+await new Promise<void>((resolve, reject) => {
+  parse(fileContentSala, {
+    columns: true,
+    skip_empty_lines: true,
+    delimiter: ",",
+    trim: true,
+  })
+    .on("data", (row) => salasRecords.push(row))
+    .on("end", resolve)
+    .on("error", reject)
+})
+
+const salasData: any[] = []
+
+for (const sala of salasRecords) {
+  // ===============================
+  // ESPECIALIDADE
+  // ===============================
+  const especialidadeNome = normalizeEspecialidade(sala.ESPECIALIDADE)
+  const especialidadeId =
+    especialidadeSalaMap.get(especialidadeNome) ??
+    especialidadeSalaMap.get("cid")
+
+  if (!especialidadeId) {
+    throw new Error(`Especialidade não encontrada: ${sala.ESPECIALIDADE}`)
+  }
+
+  // ===============================
+  // BLOCO (CRIA SE NÃO EXISTIR)
+  // ===============================
+  const blocoNomeOriginal = sala.BLOCO?.trim()
+  if (!blocoNomeOriginal) {
+    throw new Error(`Sala ${sala.ID_Ambiente} sem BLOCO definido`)
+  }
+
+  const blocoKey = normalizeBloco(blocoNomeOriginal)
+
+  let blocoId = blocoSalaMap.get(blocoKey)
+
+  if (!blocoId) {
+    const novoBloco = await prisma.blocoRoom.create({
+      data: { nome: blocoNomeOriginal },
     })
-      .on("data", (row) => salasRecords.push(row))
-      .on("end", resolve)
-      .on("error", reject)
+
+    blocoId = novoBloco.id
+    blocoSalaMap.set(blocoKey, blocoId)
+
+    console.log(`🆕 Bloco criado: ${blocoNomeOriginal}`)
+  }
+
+  // ===============================
+  // SALA
+  // ===============================
+  salasData.push({
+    ID_Ambiente: sala.ID_Ambiente,
+    blocoId,
+    especialidadeId,
+    tipo: sala.TIPO,
+    banheiro: sala.BANHEIRO?.toUpperCase() === "SIM",
+    ambiente: sala.AMBIENTE,
+    area: parseFloat(sala["ÁREA"].replace(",", ".")),
+    active: true,
   })
+}
 
-  const salasData = salasRecords.map((sala) => {
-    const especialidadeNome = normalizeEspecialidade(sala.ESPECIALIDADE)
+await prisma.room.createMany({
+  data: salasData,
+  skipDuplicates: true,
+})
 
-    const especialidadeId =
-      especialidadeSalaMap.get(especialidadeNome) ??
-      especialidadeSalaMap.get("cid")
-
-    if (!especialidadeId) {
-      throw new Error(`Especialidade de sala não encontrada: ${sala.ESPECIALIDADE}`)
-    }
-
-    return {
-      ID_Ambiente: sala.ID_Ambiente,
-      bloco: sala.BLOCO,
-      especialidadeId,
-      tipo: sala.TIPO,
-      banheiro: sala.BANHEIRO?.toUpperCase() === "SIM",
-      ambiente: sala.AMBIENTE,
-      area: parseFloat(sala["ÁREA"].replace(",", ".")),
-      active: true,
-    }
-  })
-
-  await prisma.room.createMany({
-    data: salasData,
-    skipDuplicates: true,
-  })
-
-  console.log(`✅ ${salasData.length} salas criadas`)
+console.log(`✅ ${salasData.length} salas criadas`)
 
   // ===============================
   // 👤 USUÁRIOS

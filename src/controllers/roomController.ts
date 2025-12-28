@@ -8,15 +8,16 @@ import { cancelAndArchivePeriods, checkActiveRoomConflicts, TransactionClient } 
 
 
 // ✅ Criação de sala
+// ✅ Criação de sala
 export async function createRoom(req: Request, res: Response) {
   const schema = z.object({
-    number: z.string(),
-    tipo: z.string(),
+    number: z.string().min(0),
+    tipo: z.string().min(0),
     banheiro: z.boolean(),
-    ala: z.string(),
-    ambiente: z.string(),
-    especialidadeRoomId: z.number(),
-    area: z.number(),
+    blocoId: z.number().int().positive(),
+    ambiente: z.string().min(1),
+    especialidadeRoomId: z.number().int().positive(),
+    area: z.number().positive(),
   });
 
   debugLog("createRoom - dados recebidos", req.body);
@@ -24,46 +25,62 @@ export async function createRoom(req: Request, res: Response) {
   try {
     const data = schema.parse(req.body);
 
-    // Verifica se já existe sala com mesmo ID_Ambiente
+    // 🔹 Verifica se já existe sala com mesmo ID_Ambiente
     const exists = await prisma.room.findFirst({
       where: { ID_Ambiente: data.number },
     });
 
     if (exists) {
-      return res.status(409).json({ error: 'Já existe uma sala com esse ID_Ambiente.' });
+      return res
+        .status(409)
+        .json({ error: "Já existe uma sala com esse ID_Ambiente." });
     }
 
+    // 🔹 Valida bloco
+    const blocoExists = await prisma.blocoRoom.findUnique({
+      where: { id: data.blocoId },
+    });
+
+    if (!blocoExists) {
+      return res.status(400).json({ error: "Bloco inválido" });
+    }
+
+    // 🔹 Valida especialidade
     const especialidadeExists = await prisma.especialidadeRoom.findUnique({
       where: { id: data.especialidadeRoomId },
-    })
+    });
 
     if (!especialidadeExists) {
-      return res.status(400).json({ error: "Especialidade da sala inválida" })
+      return res
+        .status(400)
+        .json({ error: "Especialidade da sala inválida" });
     }
 
-
+    // 🔹 Criação da sala
     const room = await prisma.room.create({
       data: {
         ID_Ambiente: data.number,
         tipo: data.tipo,
         banheiro: data.banheiro,
-        bloco: data.ala,
+        blocoId: data.blocoId, // ✅ agora sempre ID
         ambiente: data.ambiente,
         especialidadeId: data.especialidadeRoomId,
         area: data.area,
+        active: true, // 🔹 se existir no schema
       },
     });
 
     return res.status(201).json(room);
-
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
+
     console.error("Erro ao criar sala:", error);
-    return res.status(500).json({ error: 'Erro interno do servidor' });
+    return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
+
 
 // ✅ Listar salas
 export async function listRooms(req: Request, res: Response) {
@@ -84,7 +101,7 @@ export async function listRooms(req: Request, res: Response) {
     // ADMIN vê tudo
     if (usuario.hierarquia === "admin") {
       const rooms = await prisma.room.findMany({
-        include: { especialidade: true },
+        include: { especialidade: true, bloco: true},
       })
       return res.json({ data: rooms })
     }
@@ -123,8 +140,8 @@ export async function listRooms(req: Request, res: Response) {
 // ✅ Editar sala
 export async function editRoom(req: Request, res: Response) {
   const schema = z.object({
-    especialidadeRoomId: z.number().optional(),
-    ala: z.string().optional(),
+    especialidadeId: z.number().optional(),
+    blocoId: z.number().optional(),
     ambiente: z.string().optional(),
     banheiro: z.boolean().optional(),
     tipo: z.string().optional(),
@@ -132,39 +149,69 @@ export async function editRoom(req: Request, res: Response) {
     force: z.boolean().optional(),
   });
 
-  const idFromParams = parseInt(req.params.id as string);
-  debugLog('Tentativa de edição da sala ID:', idFromParams, 'com dados:', req.body);
+  const idFromParams = Number(req.params.id);
+
+  if (Number.isNaN(idFromParams)) {
+    return res.status(400).json({ error: "ID inválido" });
+  }
+
+  debugLog(
+    "Tentativa de edição da sala ID:",
+    idFromParams,
+    "com dados:",
+    req.body
+  );
 
   try {
     const data = schema.parse(req.body);
-    const existingRoom = await prisma.room.findUnique({ where: { id: idFromParams } });
+
+    const existingRoom = await prisma.room.findUnique({
+      where: { id: idFromParams },
+      include: {
+        bloco: { select: { id: true, nome: true } },
+      },
+    });
 
     if (!existingRoom) {
-      return res.status(404).json({ error: 'Sala não encontrada.' });
+      return res.status(404).json({ error: "Sala não encontrada." });
     }
 
-    if (data.especialidadeRoomId) {
+    // ✅ valida especialidade SOMENTE se veio no payload
+    if (data.especialidadeId !== undefined) {
       const especialidadeExists = await prisma.especialidadeRoom.findUnique({
-        where: { id: data.especialidadeRoomId },
-      })
+        where: { id: data.especialidadeId },
+      });
 
       if (!especialidadeExists) {
-        return res.status(400).json({ error: "Especialidade da sala inválida" })
+        return res
+          .status(400)
+          .json({ error: "Especialidade da sala inválida" });
       }
     }
 
+    // ✅ valida bloco SOMENTE se veio no payload
+    if (data.blocoId !== undefined) {
+      const blocoExists = await prisma.blocoRoom.findUnique({
+        where: { id: data.blocoId },
+      });
+
+      if (!blocoExists) {
+        return res.status(400).json({ error: "Bloco inválido" });
+      }
+    }
 
     const updatePayload = {
       tipo: data.tipo ?? existingRoom.tipo,
-      bloco: data.ala ?? existingRoom.bloco, // "ala" do schema -> "bloco" no banco
+      blocoId: data.blocoId ?? existingRoom.blocoId,
       ambiente: data.ambiente ?? existingRoom.ambiente,
-      especialidadeId: data.especialidadeRoomId ?? existingRoom.especialidadeId,
+      especialidadeId:
+        data.especialidadeId ?? existingRoom.especialidadeId,
       banheiro: data.banheiro ?? existingRoom.banheiro,
       active: data.active ?? existingRoom.active,
     };
 
-    // 🔴 Caso esteja desativando, verificar conflitos
-    if (updatePayload.active === false && existingRoom.active === true) {
+    // 🔴 Caso esteja desativando a sala
+    if (existingRoom.active === true && updatePayload.active === false) {
       const conflict = await checkActiveRoomConflicts(idFromParams);
 
       if (conflict) {
@@ -178,15 +225,22 @@ export async function editRoom(req: Request, res: Response) {
 
         // ⚙️ Fluxo forçado
         await prisma.$transaction(async (tx) => {
-          await cancelAndArchivePeriods("Sala desativada", tx, conflict.periods as any, existingRoom);
-          return tx.room.update({
+          await cancelAndArchivePeriods(
+            "Sala desativada",
+            tx,
+            conflict.periods as any,
+            existingRoom
+          );
+
+          await tx.room.update({
             where: { id: idFromParams },
             data: updatePayload,
           });
         });
 
         return res.status(200).json({
-          message: 'Sala desativada com sucesso. Reservas futuras canceladas e arquivadas.',
+          message:
+            "Sala desativada com sucesso. Reservas futuras canceladas e arquivadas.",
         });
       }
     }
@@ -197,13 +251,13 @@ export async function editRoom(req: Request, res: Response) {
     });
 
     return res.status(200).json(updatedRoom);
-
   } catch (error) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
+
     console.error("Erro ao editar sala:", error);
-    return res.status(500).json({ error: 'Erro interno do servidor' });
+    return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
 
@@ -228,12 +282,18 @@ export async function deleteRooms(req: Request, res: Response) {
 
   try {
     const { ids: idArray, force } = multiDeleteSchema.parse(req.body);
+
     const existingRooms = await prisma.room.findMany({
       where: { id: { in: idArray } },
+      include: {
+        bloco: true, // 🔥 ESSENCIAL
+      },
     });
 
     if (existingRooms.length === 0) {
-      return res.status(404).json({ error: 'Nenhuma sala válida encontrada para exclusão.' });
+      return res.status(404).json({
+        error: 'Nenhuma sala válida encontrada para exclusão.',
+      });
     }
 
     const allConflicts: MultiConflictDetail[] = [];
@@ -245,7 +305,7 @@ export async function deleteRooms(req: Request, res: Response) {
         allConflicts.push({
           roomId: room.id,
           roomNumber: room.ID_Ambiente,
-          roomBloco: room.bloco,
+          roomBloco: room.bloco.nome, 
           message: conflictResult.message,
           isRecurring: conflictResult.isRecurring,
           periods: conflictResult.periods as any,
@@ -253,9 +313,12 @@ export async function deleteRooms(req: Request, res: Response) {
       }
     }
 
+    // ⚠️ EXISTEM CONFLITOS
     if (allConflicts.length > 0) {
       if (!force) {
-        const conflictRoomNumbers = allConflicts.map(c => `${c.roomNumber} (${c.roomBloco})`).join(', ');
+        const conflictRoomNumbers = allConflicts
+          .map(c => `${c.roomNumber} (${c.roomBloco})`)
+          .join(', ');
 
         return res.status(409).json({
           error: `Conflito de agendamento detectado em ${allConflicts.length} sala(s).`,
@@ -269,13 +332,23 @@ export async function deleteRooms(req: Request, res: Response) {
         });
       }
 
-      await prisma.$transaction(async (tx: TransactionClient) => {
+      // 🧨 FORCE DELETE
+      await prisma.$transaction(async (tx) => {
         for (const room of existingRooms) {
           const conflictDetail = allConflicts.find(c => c.roomId === room.id);
+
           if (conflictDetail) {
-            await cancelAndArchivePeriods('Sala excluída', tx, conflictDetail.periods, room);
+            await cancelAndArchivePeriods(
+              'Sala excluída',
+              tx,
+              conflictDetail.periods,
+              room
+            );
           }
-          await tx.room.delete({ where: { id: room.id } });
+
+          await tx.room.delete({
+            where: { id: room.id },
+          });
         }
       });
 
@@ -285,6 +358,7 @@ export async function deleteRooms(req: Request, res: Response) {
       });
     }
 
+    // ✅ SEM CONFLITOS → DELETE DIRETO
     const deleted = await prisma.room.deleteMany({
       where: { id: { in: idArray } },
     });
@@ -298,13 +372,21 @@ export async function deleteRooms(req: Request, res: Response) {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ errors: error.errors });
     }
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2003') {
+
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === 'P2003'
+    ) {
       return res.status(409).json({
-        error: 'Não foi possível excluir uma ou mais salas devido a dependências existentes (FK).',
+        error:
+          'Não foi possível excluir uma ou mais salas devido a dependências existentes (FK).',
       });
     }
+
     console.error('Erro ao deletar salas:', error);
-    return res.status(500).json({ error: 'Erro interno do servidor ao deletar salas.' });
+    return res.status(500).json({
+      error: 'Erro interno do servidor ao deletar salas.',
+    });
   }
 }
 
@@ -397,6 +479,11 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     return res.status(400).json({ message: "Bloco inválido." });
   }
 
+  const blockNumber = Number(block);
+  if (isNaN(blockNumber)) {
+    return res.status(400).json({ message: "Bloco inválido." });
+  }
+
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return res.status(400).json({ message: "Data inválida. Use YYYY-MM-DD." });
   }
@@ -414,7 +501,7 @@ export async function getBlockDayGrade(req: Request, res: Response) {
 
     // 🔹 Buscar todas as salas do bloco
     const rooms = await prisma.room.findMany({
-      where: { bloco: block },
+      where: { blocoId: blockNumber },
     });
 
     if (rooms.length === 0) {

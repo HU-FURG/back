@@ -14,6 +14,7 @@ import periodRoutes from './routes/periodRoutes'
 import userRoutes from './routes/userRoutes'
 import schedulingRoutes from './routes/schedulingRouter'
 import rescheduleRouter from './routes/rescheduleRouter'
+import configRoutes from './routes/configRoutes'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
@@ -43,6 +44,7 @@ app.use('/api', roomRoutes); // Salas
 app.use('/api', periodRoutes); // Agendamentos
 app.use('/api', userRoutes); // sistema login get users CRUD usuarios
 app.use('/api', dashboardRoutes) // dashboard
+app.use('/api/config', configRoutes) // dashboard
 app.use('/api/scheduling', schedulingRoutes) // gerenciamento de agendamentos
 app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
 
@@ -61,7 +63,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   const log = await getSystemLog('last_clear_update');
   const lastRun = log?.updatedAt ?? new Date(0);
   const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
-  if (diffHours >= 24) {
+  if (diffHours >= 1) {
     console.log('⚙️ Rodando rotina de limpeza atrasada no startup...');
     await clearPeriodsandUpdate();
   } else {

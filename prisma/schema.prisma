@@ -64,24 +64,35 @@ model EspecialidadeRoom {
   rooms Room[]
 }
 
-model Room {
-  id            Int      @id @default(autoincrement())
-  ID_Ambiente   String   @unique
-  bloco         String
-  especialidadeId Int
-  
+model BlocoRoom {
+  id    Int    @id @default(autoincrement())
+  nome  String @unique
 
-  tipo          String
-  banheiro      Boolean
-  ambiente      String
-  area          Float
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  rooms Room[]
+}
+
+
+model Room {
+  id              Int      @id @default(autoincrement())
+  ID_Ambiente     String   @unique
+
+  blocoId         Int
+  especialidadeId Int
+
+  tipo            String
+  banheiro        Boolean
+  ambiente        String
+  area            Float
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bloco           BlocoRoom @relation(fields: [blocoId], references: [id])
+  especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 
   periods RoomPeriod[]
-  especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 }
+
 
 model RoomPeriod {
   id          Int      @id @default(autoincrement())

@@ -62,11 +62,19 @@ export type TransactionClient = Omit<
 /**
  * Cancela e arquiva uma lista de períodos de reserva dentro de uma transação.
  */
+
+type RoomForArchive = {
+  ID_Ambiente: string;
+  bloco: {
+    nome: string;
+  };
+};
+
 export async function cancelAndArchivePeriods(
   reason: string,
   tx: TransactionClient,
   activePeriods: ({ userId: number | null } & RoomPeriod)[],
-  existingRoom: Pick<Room, 'ID_Ambiente' | 'bloco'>
+  existingRoom: RoomForArchive
 ): Promise<void> {
   for (const period of activePeriods) {
     const durationInMinutes = Math.round(
@@ -79,7 +87,7 @@ export async function cancelAndArchivePeriods(
         nome: period.nome,
         durationInMinutes,
         roomIdAmbiente: existingRoom.ID_Ambiente,
-        roomBloco: existingRoom.bloco,
+        roomBloco: existingRoom.bloco.nome, // ✅ agora correto
         originalStart: period.start,
         originalEnd: period.end,
         reason: reason ?? 'CANCELADO_ADMIN',
