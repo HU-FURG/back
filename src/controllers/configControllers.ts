@@ -154,9 +154,18 @@ export async function createEspecialidadeUser(req: Request, res: Response) {
 export async function listBlocos(req: Request, res: Response) {
   const blocos = await prisma.blocoRoom.findMany({
     orderBy: { nome: "asc" },
+    include: {
+      _count: { select: { rooms: true } }
+    }
   });
 
-  return res.json({ data: blocos });
+  const data = blocos.map((b) => ({
+    id: b.id,
+    nome: b.nome,
+    totalSalas: b._count.rooms,
+  }))
+
+  return res.json({ data: data });
 }
 
 export async function createBloco(req: Request, res: Response) {
