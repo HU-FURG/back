@@ -47,22 +47,24 @@ model User {
   histories             PeriodHistory[]
 }
 
+model EspecialidadeRoom {
+  id    Int    @id @default(autoincrement())
+  nome  String @unique
+
+  especialidadesAceitas EspecialidadeUser[] @relation("RoomAceitas")
+
+  rooms Room[]
+}
+
 model EspecialidadeUser {
   id    Int    @id @default(autoincrement())
   nome  String @unique
 
-  // relações
   users User[]
+
+  roomsAceitas EspecialidadeRoom[] @relation("RoomAceitas")
 }
 
-model EspecialidadeRoom {
-  id    Int    @id @default(autoincrement())
-  nome  String @unique
-  especialidadesAceitas String?
-
-  // relações
-  rooms Room[]
-}
 
 model BlocoRoom {
   id    Int    @id @default(autoincrement())

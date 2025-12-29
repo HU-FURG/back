@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createBloco, createEspecialidadeRoom, createEspecialidadeUser, createUser, editBloco, editUser, getRoomFilters, listBlocos, listRoomEspecialidades, listUsers, listUsersEspecialidades } from '../controllers/configControllers';
+import { createBloco, createEspecialidadeRoom, createEspecialidadeUser, createUser, editBloco, editUser, getRoomFilters, listBlocos, listRoomEspecialidades, listUsers, listUsersEspecialidades, updateEspecialidadeRoom } from '../controllers/configControllers';
 import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
@@ -12,6 +12,7 @@ router.get('/rooms/filters', authenticateToken, getRoomFilters);
 //especialidades salas
 router.get('/rooms/especialidades', authenticateToken, listRoomEspecialidades);
 router.post('/rooms/especialidades', authenticateToken, createEspecialidadeRoom);
+router.put('/rooms/especialidades/:id', authenticateToken, updateEspecialidadeRoom);
 //-------------------------------------------------
 // especialidade users
 //-------------------------------------------------

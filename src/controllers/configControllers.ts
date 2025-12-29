@@ -99,29 +99,74 @@ export async function editUser(req: Request, res: Response) {
 export async function listRoomEspecialidades(req: Request, res: Response) {
   const especialidades = await prisma.especialidadeRoom.findMany({
     orderBy: { nome: "asc" },
-  });
+    include: {
+      especialidadesAceitas: {
+        select: {
+          id: true,
+          nome: true,
+        },
+      },
+    },
+  })
 
-  return res.json({ data: especialidades });
+  return res.json({ data: especialidades })
 }
+
 
 export async function createEspecialidadeRoom(req: Request, res: Response) {
   const schema = z.object({
     nome: z.string(),
-    especialidadesAceitas: z.array(z.string()).optional(),
-  });
+    especialidadesAceitas: z.array(z.number()).optional(),
+  })
 
-  const data = schema.parse(req.body);
+  const data = schema.parse(req.body)
 
   const roomEsp = await prisma.especialidadeRoom.create({
     data: {
       nome: data.nome,
-      especialidadesAceitas: data.especialidadesAceitas
-        ? JSON.stringify(data.especialidadesAceitas)
-        : null,
+      ...(data.especialidadesAceitas && {
+        especialidadesAceitas: {
+          connect: data.especialidadesAceitas.map((id) => ({ id })),
+        },
+      }),
     },
-  });
+    include: {
+      especialidadesAceitas: {
+        select: { id: true, nome: true },
+      },
+    },
+  })
 
-  return res.status(201).json(roomEsp);
+  return res.status(201).json(roomEsp)
+}
+
+export async function updateEspecialidadeRoom(req: Request, res: Response) {
+  const schema = z.object({
+    nome: z.string(),
+    especialidadesAceitas: z.array(z.number()).optional(),
+  })
+
+  const { id } = req.params
+  const data = schema.parse(req.body)
+
+  const updated = await prisma.especialidadeRoom.update({
+    where: { id: Number(id) },
+    data: {
+      nome: data.nome,
+      ...(data.especialidadesAceitas && {
+        especialidadesAceitas: {
+          set: data.especialidadesAceitas.map((id) => ({ id })),
+        },
+      }),
+    },
+    include: {
+      especialidadesAceitas: {
+        select: { id: true, nome: true },
+      },
+    },
+  })
+
+  return res.json(updated)
 }
 
 //------------------------------------------------
@@ -131,9 +176,18 @@ export async function createEspecialidadeRoom(req: Request, res: Response) {
 export async function listUsersEspecialidades(req: Request, res: Response) {
   const especialidades = await prisma.especialidadeUser.findMany({
     orderBy: { nome: "asc" },
+    include: {
+      _count: { select: { users: true } },
+    },
   });
 
-  return res.json({ data: especialidades });
+  const data = especialidades.map((e) => ({
+    id: e.id,
+    nome: e.nome,
+    totalUsers: e._count.users,
+  }))
+
+  return res.json({ data: data });
 }
 
 export async function createEspecialidadeUser(req: Request, res: Response) {

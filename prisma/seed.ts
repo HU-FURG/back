@@ -92,18 +92,14 @@ async function seedEspecialidadesSala() {
   for (const nome of especialidadeRooms) {
     await prisma.especialidadeRoom.upsert({
       where: { nome },
-      update: {
-        especialidadesAceitas: "[]",
-      },
-      create: {
-        nome,
-        especialidadesAceitas: "[]",
-      },
+      update: {},
+      create: { nome },
     })
   }
 
   console.log("✅ Especialidades de sala criadas")
 }
+
 
 
 async function seedAdmin() {
