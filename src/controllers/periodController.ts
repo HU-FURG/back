@@ -14,6 +14,7 @@ const HorarioSchema = z.object({
 })
 
 const BodySchema = z.object({
+  userId: z.number(),
   horarios: z.array(HorarioSchema),
   recorrente: z.boolean(),
   maxTimeRecorrente: z.number(), // em meses
@@ -24,174 +25,207 @@ const BodySchema = z.object({
 
 export const AgendamentoSchema = z.object({
   salaId: z.number(),
-  responsavel: z.string(),
+  scheduledForId: z.number().optional(), // 🔥 vem do front
   horarios: z.array(HorarioSchema),
   recorrente: z.boolean(),
-  userId: z.number().optional(), 
   maxTimeRecorrente: z.number(),
 });
 
-type BuscarSalasBody = z.infer<typeof BodySchema>
-type AgendarSalaBody = z.infer<typeof AgendamentoSchema>
 
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    const { horarios, recorrente,maxTimeRecorrente, lastRoomId, numeroSala, bloco } = req.body;
+    const {
+      userId,
+      horarios,
+      recorrente,
+      maxTimeRecorrente,
+      lastRoomId,
+      numeroSala,
+      bloco,
+    } = BodySchema.parse(req.body);
+
+    const TZ = "America/Sao_Paulo";
+    const agoraUTC = DateTime.now().setZone(TZ).toUTC();
 
     // ==================================================
-    // 1) VALIDAÇÃO INICIAL DOS HORÁRIOS
+    // 1) Validação inicial
     // ==================================================
     const result = validateHorarios(horarios, recorrente);
     if (!result.ok) {
       return res.status(400).json({ message: result.error });
     }
 
-    const TZ = "America/Sao_Paulo";
-    const agoraUTC = DateTime.now().setZone(TZ).toUTC();
-
-
-    // 1. Verifica usuário autenticado
-    const usuarioLogado = await prisma.user.findUnique({
-      where: { id: user.userId },
+    const usuarioAlvo = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        active: true,
+        especialidadeId: true,
+      },
     });
 
-    // ==================================================
-    // 2) Converter horários da requisição → UTC
-    // ==================================================
-    const horariosReq = horarios.map((h: { data: any; horaInicio: any; horaFim: any; }) => {
-      const inicio = DateTime.fromISO(`${h.data}T${h.horaInicio}`, { zone: TZ }).toUTC();
-      const fim    = DateTime.fromISO(`${h.data}T${h.horaFim}`,    { zone: TZ }).toUTC();
-      return {
-        ...h,
-        inicio,
-        fim,
-        diaSemana: inicio.weekday,
-      };
-    });
+    if (!usuarioAlvo || !usuarioAlvo.active) {
+      return res.status(404).json({
+        message: "Usuário informado não existe ou está inativo.",
+      });
+    }
 
     // ==================================================
-    // 3) Buscar as salas, aplicando filtros e paginação
+    // 2) Converter horários para UTC
     // ==================================================
+    const horariosReq = horarios.map(
+      (h: { data: string; horaInicio: string; horaFim: string }) => {
+        const inicio = DateTime.fromISO(
+          `${h.data}T${h.horaInicio}`,
+          { zone: TZ }
+        ).toUTC();
 
-    let whereCondition: any = { active: true }
+        const fim = DateTime.fromISO(
+          `${h.data}T${h.horaFim}`,
+          { zone: TZ }
+        ).toUTC();
 
-    // Checa se é uma busca filtrada (que sempre deve começar do ID 1)
+        return {
+          ...h,
+          inicio,
+          fim,
+          diaSemana: inicio.weekday,
+        };
+      }
+    );
+
+    // ==================================================
+    // 3) Montar filtros de busca
+    // ==================================================
+    const whereCondition: any = { active: true };
+
+    // 🔒 FUTURO: limitar salas pela especialidade do usuário
+    // if (usuarioAlvo.especialidadeId) {
+    //   whereCondition.especialidadeId = usuarioAlvo.especialidadeId;
+    // }
+
     const isFilteredSearch = !!numeroSala || !!bloco;
-    
-    // --- FILTROS ---
+
     if (numeroSala) {
-        whereCondition.ID_Ambiente = { contains: numeroSala, mode: 'insensitive' };
-    }
-    
-    if (bloco) {
-        whereCondition.bloco = { equals: bloco, mode: 'insensitive' };
-    }
-    
-    // --- LÓGICA DE PAGINAÇÃO (apenas se NÃO houver filtros e lastRoomId > -1) ---
-    if (!isFilteredSearch && lastRoomId > -1) {
-        // Se a paginação está ativa, buscamos a partir do último ID.
-        // Usamos um 'take' alto (ex: 50) para garantir que temos salas suficientes para encontrar 12 DISPONÍVEIS.
-        whereCondition.id = { gt: lastRoomId };
+      whereCondition.ID_Ambiente = {
+        contains: numeroSala,
+        mode: "insensitive",
+      };
     }
 
-    // A busca inicial no Prisma
+    if (bloco) {
+      whereCondition.bloco = {
+        nome: { equals: bloco, mode: "insensitive" },
+      };
+    }
+
+    if (!isFilteredSearch && lastRoomId > -1) {
+      whereCondition.id = { gt: lastRoomId };
+    }
+
+    // ==================================================
+    // 4) Buscar salas
+    // ==================================================
     const salas = await prisma.room.findMany({
-        where: whereCondition,
-        orderBy: { id: "asc" },
-        include: {
-            periods: {
-                where: {
-                    end: { gte: agoraUTC.toJSDate() }, // só períodos ainda relevantes
-                }
-            }
-        }
+      where: whereCondition,
+      orderBy: { id: "asc" },
+      include: {
+        bloco: true,
+        periods: {
+          where: {
+            end: { gte: agoraUTC.toJSDate() },
+          },
+        },
+      },
     });
 
     // ==================================================
-    // 6) Filtrar salas sem conflito
+    // 5) Filtrar por conflito
     // ==================================================
-    let ultimoIdDaBusca = -1; // Usado para a próxima paginação (ID da última sala buscada no DB)
-    
-    const salasDisponiveis: any[] = [];
+    let ultimoIdDaBusca = -1;
+    const salasDisponiveis: typeof salas = [];
 
     for (const sala of salas) {
-    if (salasDisponiveis.length < 12) {
-        // Verifica se TODOS os horários solicitados estão livres nesta sala
-        const isAvailable = horariosReq.every((req: any) => {
-            
-            // Verifica se ALGUM período existente no banco conflita com o horário atual da requisição
-            const temConflito = sala.periods.some((dbPeriod: any) => {
-                return verificarConflitoUniversal(
-                    req.data,         // String 'YYYY-MM-DD' da requisição
-                    req.horaInicio,   // String 'HH:mm'
-                    req.horaFim,      // String 'HH:mm'
-                    recorrente,       // Boolean
-                    maxTimeRecorrente,// Number (meses)
-                    
-                    dbPeriod.start,   // Date do banco
-                    dbPeriod.end,     // Date | null do banco
-                    dbPeriod.isRecurring, // Boolean do banco
-                    dbPeriod.maxScheduleTime
-                );
-            });
+      if (salasDisponiveis.length >= 12) break;
 
-            return !temConflito; // Se NÃO tem conflito, está livre
-        });
+      const isAvailable = horariosReq.every((reqHorario: any) => {
+        return !sala.periods.some((dbPeriod: any) =>
+          verificarConflitoUniversal(
+            reqHorario.data,
+            reqHorario.horaInicio,
+            reqHorario.horaFim,
+            recorrente,
+            maxTimeRecorrente,
+            dbPeriod.start,
+            dbPeriod.end,
+            dbPeriod.isRecurring,
+            dbPeriod.maxScheduleTime
+          )
+        );
+      });
 
-            if (isAvailable) {
-                salasDisponiveis.push(sala);
-                ultimoIdDaBusca = sala.id;
-            }
-        } else {
-            break; // Já achamos 12 salas disponíveis, saímos do loop
-        }
+      if (isAvailable) {
+        salasDisponiveis.push(sala);
+        ultimoIdDaBusca = sala.id;
+      }
     }
-    // ==================================================
-    // 7) Retorno final
-    // ==================================================
-    const indiceDaUltimaSalaProcessada = salas.findIndex(sala => sala.id === ultimoIdDaBusca);
 
-    const temMaisSalas = ultimoIdDaBusca > -1  && salasDisponiveis.length === 12 && indiceDaUltimaSalaProcessada < (salas.length - 1);
+    // ==================================================
+    // 6) Retorno
+    // ==================================================
+    const indiceUltimaSala = salas.findIndex(
+      (s) => s.id === ultimoIdDaBusca
+    );
+
+    const temMaisSalas =
+      ultimoIdDaBusca > -1 &&
+      salasDisponiveis.length === 12 &&
+      indiceUltimaSala < salas.length - 1;
 
     return res.status(200).json({
-        salas: salasDisponiveis.map(s => ({
-            id: s.id,
-            nome: s.ID_Ambiente,
-            tipo: s.tipo ?? "",
-            ala: s.bloco,
-            status: s.active ? "active" : "inactive",
-        })),
-        meta: {
-            ultimoIdAchado: ultimoIdDaBusca,
-            temMaisSalas: temMaisSalas, 
-        }
+      salas: salasDisponiveis.map((s) => ({
+        id: s.id,
+        nome: s.ID_Ambiente,
+        tipo: s.tipo ?? "",
+        ala: s.bloco.nome,
+        status: s.active ? "active" : "inactive",
+      })),
+      meta: {
+        ultimoIdAchado: ultimoIdDaBusca,
+        temMaisSalas,
+      },
     });
-
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: "Erro ao buscar salas disponíveis." });
+    return res
+      .status(500)
+      .json({ message: "Erro ao buscar salas disponíveis." });
   }
 };
+
 
 // ----------------------
 // AGENDAR SALA
 // ----------------------
 export const agendarSala = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    
-    // Validação Zod
+    const authUser = (req as any).user;
+
     const body = AgendamentoSchema.parse(req.body);
-    // Removemos o userId daqui pois vamos calcular logicamente, mas se seu schema exige, deixe estar.
-    const { salaId, responsavel, horarios, recorrente, maxTimeRecorrente } = body; 
+    const {
+      salaId,
+      scheduledForId,
+      horarios,
+      recorrente,
+      maxTimeRecorrente,
+    } = body;
 
-    
-    // 1. Verifica usuário autenticado (quem está fazendo a requisição)
+    // =========================
+    // 1️⃣ Usuário autenticado
+    // =========================
     const usuarioLogado = await prisma.user.findUnique({
-      where: { id: user.userId },
+      where: { id: authUser.userId },
     });
-
 
     if (!usuarioLogado) {
       return res.status(401).json({ message: "Usuário não autenticado." });
@@ -199,187 +233,302 @@ export const agendarSala = async (req: Request, res: Response) => {
 
     const TZ = "America/Sao_Paulo";
 
-    // 2. Buscar TODAS as reservas ativas desta sala (Lógica Mantida)
+    // =========================
+    // 2️⃣ Definir PARA QUEM é o agendamento
+    // =========================
+    let finalScheduledForId = usuarioLogado.id;
+
+    if (usuarioLogado.hierarquia === "admin") {
+      if (!scheduledForId) {
+        return res.status(400).json({
+          message: "Admin deve informar o usuário para quem será o agendamento.",
+        });
+      }
+
+      const usuarioAlvo = await prisma.user.findUnique({
+        where: { id: scheduledForId },
+        select: {
+          id: true,
+          especialidadeId: true, // 🔮 já preparando futuro
+          active: true,
+        },
+      });
+
+      if (!usuarioAlvo || !usuarioAlvo.active) {
+        return res.status(404).json({
+          message: "Usuário informado não existe ou está inativo.",
+        });
+      }
+
+      finalScheduledForId = usuarioAlvo.id;
+
+      // 🔮 FUTURO:
+      // aqui entra a validação de especialidade x sala
+    }
+
+    // =========================
+    // 3️⃣ Buscar reservas existentes
+    // =========================
     const reservasExistentes = await prisma.roomPeriod.findMany({
       where: {
         roomId: salaId,
         OR: [
-            { isRecurring: true },
-            { end: { gte: new Date() } } 
-        ]
-      }
+          { isRecurring: true },
+          { end: { gte: new Date() } },
+        ],
+      },
     });
 
-    // 3. Loop de Validação de Conflitos (Lógica Mantida)
+    // =========================
+    // 4️⃣ Validação de conflito
+    // =========================
     for (const { data, horaInicio, horaFim } of horarios) {
-      const temConflito = reservasExistentes.some((dbPeriod) => {
-        return verificarConflitoUniversal(
-          data, horaInicio, horaFim, recorrente, maxTimeRecorrente,
-          dbPeriod.start, dbPeriod.end, dbPeriod.isRecurring, dbPeriod.maxScheduleTime
-        );
-      });
+      const temConflito = reservasExistentes.some((dbPeriod) =>
+        verificarConflitoUniversal(
+          data,
+          horaInicio,
+          horaFim,
+          recorrente,
+          maxTimeRecorrente,
+          dbPeriod.start,
+          dbPeriod.end,
+          dbPeriod.isRecurring,
+          dbPeriod.maxScheduleTime
+        )
+      );
 
       if (temConflito) {
         return res.status(400).json({
-          message: `Conflito de horário detectado no dia ${data} (${horaInicio}-${horaFim}). Atualize a lista e tente novamente.`,
+          message: `Conflito de horário detectado no dia ${data} (${horaInicio}-${horaFim}).`,
         });
       }
     }
 
-    // ==================================================
-    // 4. Preparar Dados para Salvar (LÓGICA NOVA AQUI)
-    // ==================================================
-    
+    // =========================
+    // 5️⃣ Auto approve
+    // =========================
     const autoApproveConfig = await prisma.systemLog.findUnique({
-      where: { key: "last_clear_update" }
+      where: { key: "last_clear_update" },
     });
-    const autoApprove = autoApproveConfig?.autoApprove ?? false;
 
-    // --- INÍCIO DA ALTERAÇÃO ---
-    let donoReserva = usuarioLogado.id; // Default: o próprio usuário logado
+    const approved =
+      usuarioLogado.hierarquia === "admin"
+        ? true
+        : autoApproveConfig?.autoApprove ?? false;
 
-    // Se for ADMIN, buscamos o usuário alvo pelo campo 'responsavel' (login)
-    if (usuarioLogado.hierarquia === "admin") {
-        if (responsavel) {
-            // Busca o usuário dono da reserva pelo login informado no campo responsavel
-            const usuarioAlvo = await prisma.user.findUnique({
-                where: { login: responsavel }
-            });
+    // =========================
+    // 6️⃣ Criar registros
+    // =========================
+    const registros = horarios.map(({ data, horaInicio, horaFim }) => {
+      const inicioUTC = DateTime.fromISO(`${data}T${horaInicio}`, {
+        zone: TZ,
+      }).toUTC();
 
-            if (!usuarioAlvo) {
-                return res.status(404).json({ 
-                    message: `Admin: O usuário com login '${responsavel}' não foi encontrado no sistema.` 
-                });
-            }
-            
-            donoReserva = usuarioAlvo.id;
-        } else {
-            // Opcional: Se o admin não passar responsável, decide se dá erro ou se assume ele mesmo.
-            // Aqui estou assumindo ele mesmo caso venha vazio.
-            donoReserva = usuarioLogado.id; 
-        }
-    }
-    // Se for USER comum, a variável 'donoReserva' já é 'usuarioLogado.id' (definido acima)
-    // --- FIM DA ALTERAÇÃO ---
+      const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, {
+        zone: TZ,
+      }).toUTC();
 
-    const approved = usuarioLogado.hierarquia === "admin" ? true : autoApprove;
+      let maxUTC: Date | null = null;
 
-    console.log("\n============= CRIANDO REGISTROS =============");
-
-    const registros = horarios.map(({ data, horaInicio, horaFim }: any) => {
-      const inicioUTC = DateTime.fromISO(`${data}T${horaInicio}`, { zone: TZ }).toUTC();
-      const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, { zone: TZ }).toUTC();
-
-      let maxUTC = null;
-      if (recorrente && typeof maxTimeRecorrente === 'number') {
-          maxUTC = inicioUTC
-              .plus({ months: maxTimeRecorrente })
-              .endOf('day')
-              .toUTC();
+      if (recorrente && maxTimeRecorrente > 0) {
+        maxUTC = inicioUTC
+          .plus({ months: maxTimeRecorrente })
+          .endOf("day")
+          .toUTC()
+          .toJSDate();
       }
 
       return {
         roomId: salaId,
-        userId: donoReserva, // Usa o ID calculado na nova lógica
-        nome: responsavel,   // Mantém o nome/login texto para visualização rápida
+        createdById: usuarioLogado.id,
+        scheduledForId: finalScheduledForId,
         start: inicioUTC.toJSDate(),
         end: fimUTC.toJSDate(),
         isRecurring: recorrente,
-        maxScheduleTime: maxUTC ? maxUTC.toJSDate() : null, 
+        maxScheduleTime: maxUTC,
         approved,
-        createdAt: new Date(),
       };
     });
 
-    // 5. Salvar no Banco
     await prisma.roomPeriod.createMany({ data: registros });
 
-    console.log("\n✔️ AGENDAMENTO SALVO COM SUCESSO!");
-
-    return res.status(201).json({ message: "Agendamento criado com sucesso." });
+    return res.status(201).json({
+      message: "Agendamento criado com sucesso.",
+    });
 
   } catch (error: any) {
     console.error("Erro ao agendar sala:", error);
+
     if (error.errors) {
-        return res.status(400).json({ message: "Dados inválidos", details: error.errors });
+      return res.status(400).json({
+        message: "Dados inválidos",
+        details: error.errors,
+      });
     }
-    return res.status(500).json({ message: "Erro interno ao agendar sala." });
+
+    return res.status(500).json({
+      message: "Erro interno ao agendar sala.",
+    });
   }
 };
+
+
 
 // ===============================
 //  Listar minhas reservas
 // ===============================
-export async function listarMinhasReservas(req: Request, res: Response) { // testar
+export async function listarMinhasReservas(req: Request, res: Response) {
   try {
-    const userId = (req as any).user?.userId;
+    const user = (req as any).user;
 
-    console.log("User ID para listar reservas:", userId);
-    if (!userId) {
+    if (!user?.userId) {
       return res.status(401).json({ error: "Usuário não autenticado" });
     }
 
-    const reservas = await prisma.roomPeriod.findMany({
-      where: { userId },
-      include: {
-        room: { select: { ID_Ambiente: true, bloco: true } },
-      },
-      orderBy: { start: "desc" },
+    // Busca hierarquia do usuário
+    const usuario = await prisma.user.findUnique({
+      where: { id: user.userId },
+      select: { hierarquia: true },
     });
 
-    res.json({ success: true, reservas });
+    if (!usuario) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+
+    // 🔥 REGRA DE VISIBILIDADE
+    const whereCondition =
+      usuario.hierarquia === "admin"
+        ? { createdById: user.userId }      // admin vê o que ELE criou
+        : { scheduledForId: user.userId };  // user vê o que foi agendado PRA ELE
+
+    const reservas = await prisma.roomPeriod.findMany({
+      where: whereCondition,
+      include: {
+        room: {
+          select: {
+            ID_Ambiente: true,
+            tipo: true,
+            bloco: {
+              select: {
+                nome: true,
+              },
+            },
+          },
+        },
+        createdBy: {
+          select: {
+            id: true,
+            login: true,
+            nome: true,
+          },
+        },
+        scheduledFor: {
+          select: {
+            id: true,
+            login: true,
+            nome: true,
+          },
+        },
+      },
+      orderBy: {
+        start: "desc",
+      },
+    });
+
+    return res.json({
+      success: true,
+      reservas,
+    });
   } catch (err) {
     console.error("Erro ao listar reservas:", err);
-    res.status(500).json({ error: "Erro interno ao listar reservas" });
+    return res.status(500).json({
+      error: "Erro interno ao listar reservas",
+    });
   }
 }
+
 
 // ===============================
 //  Cancelar reserva
 // ===============================
-export async function cancelarReserva(req: Request, res: Response) { // testar
+export async function cancelarReserva(req: Request, res: Response) {
   try {
     const user = (req as any).user;
-    const userId = (req as any).user?.userId;
-    const reservaId = parseInt(req.params.id);
+    const userId = user?.userId;
+    const reservaId = Number(req.params.id);
 
     if (!userId) {
       return res.status(401).json({ error: "Usuário não autenticado" });
     }
 
-    const userData = await prisma.user.findUnique({
+    const usuario = await prisma.user.findUnique({
       where: { id: userId },
       select: { hierarquia: true },
     });
 
-    if (!userData) {
+    if (!usuario) {
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
     const reserva = await prisma.roomPeriod.findUnique({
       where: { id: reservaId },
+      select: {
+        id: true,
+        start: true,
+        createdById: true,
+        scheduledForId: true,
+      },
     });
 
     if (!reserva) {
       return res.status(404).json({ error: "Reserva não encontrada" });
     }
 
-    //  Se não for admin, só pode cancelar a própria reserva
-    if (userData.hierarquia !== "admin" && reserva.userId !== userId) {
-      return res.status(403).json({ error: "Você não pode cancelar esta reserva" });
-    }
-
-    //  Verifica se a reserva já começou
     const agora = new Date();
-    if (userData.hierarquia !== "admin" && reserva.start <= agora) {
-      return res.status(400).json({ error: "Não é possível cancelar uma reserva já iniciada" });
+
+    // =========================
+    // 🔐 PERMISSÕES
+    // =========================
+
+    if (usuario.hierarquia === "admin") {
+      // admin só pode cancelar o que ELE criou
+      if (reserva.createdById !== userId) {
+        return res.status(403).json({
+          error: "Admin só pode cancelar reservas que ele criou",
+        });
+      }
+    } else {
+      // user só pode cancelar reserva agendada PARA ele
+      if (reserva.scheduledForId !== userId) {
+        return res.status(403).json({
+          error: "Você não pode cancelar esta reserva",
+        });
+      }
+
+      // user não pode cancelar se já começou
+      if (reserva.start <= agora) {
+        return res.status(400).json({
+          error: "Não é possível cancelar uma reserva já iniciada",
+        });
+      }
     }
 
-    await prisma.roomPeriod.delete({ where: { id: reservaId } });
+    // =========================
+    // 🗑️ CANCELAMENTO
+    // =========================
+    await prisma.roomPeriod.delete({
+      where: { id: reservaId },
+    });
 
-    res.json({ success: true, message: "Reserva cancelada com sucesso" });
+    return res.json({
+      success: true,
+      message: "Reserva cancelada com sucesso",
+    });
   } catch (err) {
     console.error("Erro ao cancelar reserva:", err);
-    res.status(500).json({ error: "Erro interno ao cancelar reserva" });
+    return res.status(500).json({
+      error: "Erro interno ao cancelar reserva",
+    });
   }
 }
+

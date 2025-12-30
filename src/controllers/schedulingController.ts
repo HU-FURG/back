@@ -28,67 +28,100 @@ export async function listScheduling(req: Request, res: Response) {
 
   try {
     const { page, bloco, number, tipo, date } = schema.parse(req.query);
+
     const pageSize = 12;
     const currentPage = parseInt(page || "1", 10);
     const skip = (currentPage - 1) * pageSize;
 
     const agora = new Date();
 
-    // Filtrar por datas
-    const filters: any = {};
-    if (date) {
-      const startOfDay = new Date(date + "T00:00:00");
-      const endOfDay = new Date(date + "T23:59:59");
-      filters.start = { gte: startOfDay, lte: endOfDay };
-    } else {
-      const startOfToday = new Date(agora.toISOString().split("T")[0] + "T00:00:00");
-      const endOfToday = new Date(agora.toISOString().split("T")[0] + "T23:59:59");
-      filters.start = { gte: startOfToday, lte: endOfToday };
+    // =====================
+    // FILTRO DE DATA
+    // =====================
+    const baseDate = date ?? agora.toISOString().split("T")[0];
+
+    const filters: any = {
+      start: {
+        gte: new Date(`${baseDate}T00:00:00`),
+        lte: new Date(`${baseDate}T23:59:59`),
+      },
+    };
+
+    // =====================
+    // FILTROS DA SALA
+    // =====================
+    const roomFilters: any = {};
+
+    if (number) {
+      roomFilters.ID_Ambiente = {
+        contains: number,
+        mode: "insensitive",
+      };
     }
 
-    // Filtros de sala
-    const roomFilters: any = {};
-    if (bloco) roomFilters.bloco = { contains: bloco, mode: "insensitive" };
-    if (number) roomFilters.ID_Ambiente = { contains: number, mode: "insensitive" };
-    if (tipo) roomFilters.tipo = { contains: tipo, mode: "insensitive" };
+    if (tipo) {
+      roomFilters.tipo = {
+        contains: tipo,
+        mode: "insensitive",
+      };
+    }
 
-    const total = await prisma.roomPeriod.count({
-      where: {
-        ...filters,
-        room: Object.keys(roomFilters).length ? roomFilters : undefined,
-      },
-    });
+    if (bloco) {
+      roomFilters.bloco = {
+        nome: {
+          contains: bloco,
+          mode: "insensitive",
+        },
+      };
+    }
 
+    const where = {
+      ...filters,
+      room: Object.keys(roomFilters).length ? roomFilters : undefined,
+    };
+
+    // =====================
+    // TOTAL
+    // =====================
+    const total = await prisma.roomPeriod.count({ where });
+
+    // =====================
+    // QUERY PRINCIPAL
+    // =====================
     const agendas = await prisma.roomPeriod.findMany({
-      where: {
-        ...filters,
-        room: Object.keys(roomFilters).length ? roomFilters : undefined,
-      },
-      select: {
-        id: true,
-        start: true,
-        end: true,
-        nome: true,
-        isRecurring: true,
+      where,
+      orderBy: { start: "asc" },
+      skip,
+      take: pageSize,
+      include: {
         room: {
           select: {
             id: true,
             ID_Ambiente: true,
-            bloco: true,
             tipo: true,
+            bloco: {
+              select: {
+                id: true,
+                nome: true,
+              },
+            },
           },
         },
-        user: {
+        createdBy: {
           select: {
             id: true,
             login: true,
-            hierarquia: true,
+            nome: true,
+          },
+        },
+        scheduledFor: {
+          select: {
+            id: true,
+            login: true,
+            nome: true,
           },
         },
       },
-      orderBy: { start: "asc" },
-      skip,
-      take: pageSize,
     });
 
     return res.json({
@@ -99,7 +132,9 @@ export async function listScheduling(req: Request, res: Response) {
     });
   } catch (error) {
     console.error("Erro ao listar agendamentos:", error);
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+    });
   }
 }
 
@@ -169,72 +204,101 @@ export async function listCurrentRoomStatus(req: Request, res: Response) {
       .setZone("America/Sao_Paulo")
       .toJSDate();
 
-    // 🔹 params SEMPRE string → converte
     const alaId = Number(req.params.ala);
 
     if (Number.isNaN(alaId)) {
       return res.status(400).json({ error: "ID da ala inválido" });
     }
 
-    console.log("ALA ID:", alaId);
-
-    // 🔹 Salas da ala
+    // =========================
+    // SALAS ATIVAS DA ALA
+    // =========================
     const salas = await prisma.room.findMany({
       where: {
         active: true,
-        blocoId: alaId, // ✅ agora é ID
+        blocoId: alaId,
       },
       select: {
         id: true,
         ID_Ambiente: true,
-        bloco: true,
         area: true,
+        bloco: {
+          select: {
+            id: true,
+            nome: true,
+          },
+        },
       },
     });
 
-    // 🔹 Agendamentos atuais
+    // =========================
+    // AGENDAMENTOS EM ANDAMENTO
+    // =========================
     const agendamentosAtuais = await prisma.roomPeriod.findMany({
       where: {
         start: { lte: agora },
         end: { gte: agora },
         room: {
-          blocoId: alaId, // ✅ consistente
+          blocoId: alaId,
         },
       },
       select: {
         roomId: true,
-        nome: true,
-        user: {
-          select: { login: true },
+        scheduledFor: {
+          select: {
+            id: true,
+            login: true,
+            nome: true,
+          },
+        },
+        createdBy: {
+          select: {
+            login: true,
+          },
         },
       },
     });
 
-    // 🔹 Mapa de ocupação
+    // =========================
+    // MAPA DE OCUPAÇÃO
+    // =========================
     const mapaOcupacao = agendamentosAtuais.reduce<
-      Record<number, { nome: string; responsavel?: string }>
+      Record<
+        number,
+        {
+          responsavel: string | null;
+          criadoPor: string | null;
+        }
+      >
     >((acc, ag) => {
       acc[ag.roomId] = {
-        nome: ag.nome,
-        responsavel: ag.user?.login,
+        responsavel:
+          ag.scheduledFor?.nome ??
+          ag.scheduledFor?.login ??
+          null,
+        criadoPor: ag.createdBy?.login ?? null,
       };
       return acc;
     }, {});
 
-    // 🔹 Status final
+    // =========================
+    // STATUS FINAL
+    // =========================
     const statusSalas = salas.map((s) => ({
       id: s.id,
       number: s.ID_Ambiente,
-      ala: s.bloco,
+      ala: s.bloco.nome,
       area: s.area,
       ocupado: Boolean(mapaOcupacao[s.id]),
       responsavel: mapaOcupacao[s.id]?.responsavel ?? null,
-      nome: mapaOcupacao[s.id]?.nome ?? null,
+      criadoPor: mapaOcupacao[s.id]?.criadoPor ?? null,
     }));
 
     return res.json(statusSalas);
   } catch (error) {
     console.error("Erro ao listar status das salas:", error);
-    return res.status(500).json({ error: "Erro interno do servidor" });
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+    });
   }
 }

@@ -41,10 +41,12 @@ model User {
 
   // Relações 
   especialidade   EspecialidadeUser? @relation(fields: [especialidadeId], references: [id])
-  roomPeriods           RoomPeriod[]
+
+  periodsCreated   RoomPeriod[] @relation("PeriodCreatedBy")
+  periodsFor       RoomPeriod[] @relation("PeriodScheduledFor")
+  
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
-  histories             PeriodHistory[]
 }
 
 model EspecialidadeRoom {
@@ -99,8 +101,10 @@ model Room {
 model RoomPeriod {
   id          Int      @id @default(autoincrement())
   roomId      Int
-  userId      Int?      // usuário que agendou
-  nome        String    // pra quem foi agendado
+
+  // controle de quem crio e para quem foi agendado
+  createdById Int
+  scheduledForId Int?
 
   start       DateTime
   end         DateTime
@@ -114,11 +118,13 @@ model RoomPeriod {
   updatedAt   DateTime @updatedAt
 
   room Room  @relation(fields: [roomId], references: [id])
-  user User? @relation(fields: [userId], references: [id])
+  createdBy   User @relation("PeriodCreatedBy", fields: [createdById], references: [id])
+  scheduledFor   User? @relation("PeriodScheduledFor", fields: [scheduledForId], references: [id])
 
   @@index([roomId, start])
   @@index([roomId, end])
-  @@index([userId])
+  @@index([createdById])
+  @@index([scheduledForId])
 }
 
 // --- Novo Sistema de Templates/Reagendamento ---
@@ -145,37 +151,54 @@ model RoomScheduleTemplate {
 
 // --- Histórico para Análises Individuais ---
 model PeriodHistory {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  // Detalhe da sala 
-  roomIdAmbiente String   
+  // =========================
+  // SNAPSHOT DA SALA
+  // =========================
+  roomIdAmbiente String
   roomBloco      String
+  roomTipo       String?
 
-  // Detalhe de quem agendou
-  userId         Int?   
-  user           User?    @relation(fields: [userId], references: [id])  
+  // =========================
+  // IDS (SEM FK)
+  // =========================
+  createdById     Int?
+  scheduledForId  Int?
 
-  // Detalhes do Período
-  start          DateTime
-  end            DateTime
-  weekday        Int?     
+  // =========================
+  // SNAPSHOT USUÁRIO
+  // =========================
+  createdByLogin     String?
+  createdByNome      String?
+  scheduledForLogin  String?
+  scheduledForNome   String?
 
-  // Pra quem foi agendado
-  nome           String
-  used           Boolean @default(false)   
-  startService   DateTime?
-  endService     DateTime?  
+  // =========================
+  // PERÍODO
+  // =========================
+  start    DateTime
+  end      DateTime
+  weekday  Int?
 
-  // Para analise
+  used         Boolean  @default(false)
+  startService DateTime?
+  endService   DateTime?
+
+  // =========================
+  // MÉTRICAS
+  // =========================
   durationMinutes       Int?
-  actualDurationMinutes Int?  
-  archivedAt     DateTime @default(now())
+  actualDurationMinutes Int?
+
+  archivedAt DateTime @default(now())
 
   @@index([roomIdAmbiente])
-  @@index([weekday])
+  @@index([createdById])
+  @@index([scheduledForId])
   @@index([roomIdAmbiente, start])
-  @@index([roomIdAmbiente, weekday, used])
 }
+
 
 // Esta tabela deve ser preenchida por um Cron Job no final do dia (ex: 23:59)
 model DailyRoomReport {

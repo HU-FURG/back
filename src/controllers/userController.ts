@@ -224,89 +224,89 @@ export async function createUser(req: Request, res: Response) {//verificado
   }
 }
 
-export async function removeUser(req: Request, res: Response) { //verificado
-  try {
-    console.log("Removendo usuário:", req.body);
+// export async function removeUser(req: Request, res: Response) { //verificado
+//   try {
+//     console.log("Removendo usuário:", req.body);
 
-    // 🔒 Validação segura
-    const schema = z.object({
-      login: z.string().min(1, "Login é obrigatório"),
-      force: z.boolean().optional(),
-    });
+//     // 🔒 Validação segura
+//     const schema = z.object({
+//       login: z.string().min(1, "Login é obrigatório"),
+//       force: z.boolean().optional(),
+//     });
 
-    const parsed = schema.safeParse(req.body);
+//     const parsed = schema.safeParse(req.body);
 
-    if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ error: parsed.error.errors[0].message });
-    }
+//     if (!parsed.success) {
+//       return res
+//         .status(400)
+//         .json({ error: parsed.error.errors[0].message });
+//     }
 
-    const { login, force } = parsed.data;
+//     const { login, force } = parsed.data;
 
-    // 🔎 Busca usuário
-    const user = await prisma.user.findUnique({ where: { login } });
-    if (!user) {
-      console.warn("⚠️ Usuário não encontrado:", login);
-      return res.status(404).json({ error: "Usuário não encontrado" });
-    }
+//     // 🔎 Busca usuário
+//     const user = await prisma.user.findUnique({ where: { login } });
+//     if (!user) {
+//       console.warn("⚠️ Usuário não encontrado:", login);
+//       return res.status(404).json({ error: "Usuário não encontrado" });
+//     }
 
-    // 🔍 Verifica reservas ativas
-    const reservasAtivas = await prisma.roomPeriod.findMany({
-      where: { userId: user.id, end: { gte: new Date() } },
-      include: { room: true },
-    });
+//     // 🔍 Verifica reservas ativas
+//     const reservasAtivas = await prisma.roomPeriod.findMany({
+//       where: { userId: user.id, end: { gte: new Date() } },
+//       include: { room: true },
+//     });
 
-    // ❗ Se tiver reservas e não for "force", retorna aviso
-    if (reservasAtivas.length > 0 && !force) {
-      return res.status(400).json({
-        error:
-          "Usuário possui reservas ativas. Use 'force: true' para cancelar e remover.",
-      });
-    }
+//     // ❗ Se tiver reservas e não for "force", retorna aviso
+//     if (reservasAtivas.length > 0 && !force) {
+//       return res.status(400).json({
+//         error:
+//           "Usuário possui reservas ativas. Use 'force: true' para cancelar e remover.",
+//       });
+//     }
 
-    // ⚙️ Se for force, arquiva reservas antes de apagar
-    if (reservasAtivas.length > 0 && force) {
-      console.log(`⚠️ Cancelando ${reservasAtivas.length} reservas do usuário...`);
+//     // ⚙️ Se for force, arquiva reservas antes de apagar
+//     if (reservasAtivas.length > 0 && force) {
+//       console.log(`⚠️ Cancelando ${reservasAtivas.length} reservas do usuário...`);
 
-      const templates = reservasAtivas.map((r) => {
-        const durationInMinutes =
-          (r.end.getTime() - r.start.getTime()) / (1000 * 60);
+//       const templates = reservasAtivas.map((r) => {
+//         const durationInMinutes =
+//           (r.end.getTime() - r.start.getTime()) / (1000 * 60);
 
-        return {
-          userId: r.userId,
-          nome: r.nome,
-          durationInMinutes,
-          roomIdAmbiente: r.room?.ID_Ambiente ?? "Desconhecido",
-          roomBloco: r.room?.bloco ?? "Desconhecido",
-          originalStart: r.start,
-          originalEnd: r.end,
-          reason: "Cancelado por remoção de usuário",
-        };
-      });
+//         return {
+//           userId: r.userId,
+//           nome: r.nome,
+//           durationInMinutes,
+//           roomIdAmbiente: r.room?.ID_Ambiente ?? "Desconhecido",
+//           roomBloco: r.room?.bloco ?? "Desconhecido",
+//           originalStart: r.start,
+//           originalEnd: r.end,
+//           reason: "Cancelado por remoção de usuário",
+//         };
+//       });
 
-      // 🔄 Usa transação para garantir consistência
-      await prisma.$transaction([
-        prisma.roomScheduleTemplate.createMany({ data: templates }),
-        prisma.roomPeriod.deleteMany({ where: { userId: user.id } }),
-      ]);
+//       // 🔄 Usa transação para garantir consistência
+//       await prisma.$transaction([
+//         prisma.roomScheduleTemplate.createMany({ data: templates }),
+//         prisma.roomPeriod.deleteMany({ where: { userId: user.id } }),
+//       ]);
 
-      console.log("🗑️ Reservas movidas e removidas com sucesso.");
-    }
+//       console.log("🗑️ Reservas movidas e removidas com sucesso.");
+//     }
 
-    // 🧍‍♂️ Desativa o usuário
-    await prisma.user.update({
-      where: { login },
-      data: { active: false },
-    });
+//     // 🧍‍♂️ Desativa o usuário
+//     await prisma.user.update({
+//       where: { login },
+//       data: { active: false },
+//     });
 
-    console.log("✅ Usuário removido:", login);
-    res.json({ success: true, login });
-  } catch (err) {
-    console.error("❌ Erro ao remover usuário:", err);
-    res.status(500).json({ error: "Erro interno ao remover usuário" });
-  }
-}
+//     console.log("✅ Usuário removido:", login);
+//     res.json({ success: true, login });
+//   } catch (err) {
+//     console.error("❌ Erro ao remover usuário:", err);
+//     res.status(500).json({ error: "Erro interno ao remover usuário" });
+//   }
+// }
 
 const publicUserSelect = {
   id: true,
@@ -320,6 +320,51 @@ const publicUserSelect = {
   active: true,
   descricao: true,
 };
+
+export async function searchUsers(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      query: z.string().min(1),
+    })
+
+    const { query } = schema.parse(req.query)
+
+    const users = await prisma.user.findMany({
+      where: {
+        active: true,
+        hierarquia: { not: "admin" },
+        OR: [
+          { nome: { contains: query, mode: "insensitive" } },
+          { login: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        nome: true,
+        login: true,
+        especialidade: {
+          select: { nome: true },
+        },
+      },
+      orderBy: { nome: "asc" },
+      take: 5, // 🔥 limite exato que você pediu
+    })
+
+    return res.json(
+      users.map((u) => ({
+        id: u.id,
+        nome: u.nome ?? u.login,
+        login: u.login,
+        especialidade: u.especialidade?.nome ?? "—",
+      }))
+    )
+  } catch (err) {
+    console.error("Erro ao buscar usuários:", err)
+    return res.status(500).json({
+      error: "Erro interno ao buscar usuários",
+    })
+  }
+}
 
 export async function getUsers(req: Request, res: Response) {// verificado {falta pages}
   try {
