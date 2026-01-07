@@ -20,7 +20,7 @@ const agendaSchema = z.object({
 export async function listScheduling(req: Request, res: Response) {
   const schema = z.object({
     page: z.string().optional(),
-    bloco: z.string().optional(),
+    bloco: z.coerce.number().optional(),
     number: z.string().optional(),
     tipo: z.string().optional(),
     date: z.string().optional(),
@@ -52,33 +52,55 @@ export async function listScheduling(req: Request, res: Response) {
     // =====================
     const roomFilters: any = {};
 
-    if (number) {
-      roomFilters.ID_Ambiente = {
-        contains: number,
-        mode: "insensitive",
-      };
-    }
-
-    if (tipo) {
-      roomFilters.tipo = {
-        contains: tipo,
-        mode: "insensitive",
-      };
+    if (tipo && tipo !== "all") {
+      roomFilters.tipo = tipo;
     }
 
     if (bloco) {
-      roomFilters.bloco = {
-        nome: {
-          contains: bloco,
-          mode: "insensitive",
-        },
-      };
+      roomFilters.blocoId = bloco;
     }
 
-    const where = {
+ const where: any = {
       ...filters,
-      room: Object.keys(roomFilters).length ? roomFilters : undefined,
+
+      ...(Object.keys(roomFilters).length && {
+        room: roomFilters,
+      }),
+
+      ...(number && {
+        OR: [
+          {
+            scheduledFor: {
+              is: {
+                nome: {
+                  contains: number,
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
+          {
+            room: {
+              ID_Ambiente: {
+                contains: number,
+                mode: "insensitive",
+              },
+            },
+          },
+          {
+            createdBy: {
+              nome: {
+                contains: number,
+                mode: "insensitive",
+              },
+            },
+          },
+
+        ],
+      }),
     };
+
+
 
     // =====================
     // TOTAL

@@ -17,10 +17,12 @@ const BodySchema = z.object({
   userId: z.number(),
   horarios: z.array(HorarioSchema),
   recorrente: z.boolean(),
-  maxTimeRecorrente: z.number(), // em meses
+  maxTimeRecorrente: z.string(), // em meses
   lastRoomId: z.number().optional().default(-1), 
   numeroSala: z.string().optional(),
-  bloco: z.string().optional(),
+  bloco: z.coerce.number().optional(),
+  especialidadeRoom: z.coerce.number().optional(),
+  tipo: z.string().optional(),
 })
 
 export const AgendamentoSchema = z.object({
@@ -28,7 +30,7 @@ export const AgendamentoSchema = z.object({
   scheduledForId: z.number().optional(), // 🔥 vem do front
   horarios: z.array(HorarioSchema),
   recorrente: z.boolean(),
-  maxTimeRecorrente: z.number(),
+  maxTimeRecorrente: z.string(),
 });
 
 
@@ -42,6 +44,8 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
       lastRoomId,
       numeroSala,
       bloco,
+      tipo,
+      especialidadeRoom
     } = BodySchema.parse(req.body);
 
     const TZ = "America/Sao_Paulo";
@@ -104,7 +108,8 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
     //   whereCondition.especialidadeId = usuarioAlvo.especialidadeId;
     // }
 
-    const isFilteredSearch = !!numeroSala || !!bloco;
+    const isFilteredSearch = !!numeroSala || !!bloco || (tipo && tipo !== "all") || !!especialidadeRoom;
+
 
     if (numeroSala) {
       whereCondition.ID_Ambiente = {
@@ -113,10 +118,16 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
       };
     }
 
+    if (tipo && tipo !== "all") {
+      whereCondition.tipo = tipo;
+    }
+
     if (bloco) {
-      whereCondition.bloco = {
-        nome: { equals: bloco, mode: "insensitive" },
-      };
+      whereCondition.blocoId = bloco;
+    }
+
+    if (especialidadeRoom != null) {
+      whereCondition.especialidadeId = especialidadeRoom;
     }
 
     if (!isFilteredSearch && lastRoomId > -1) {
@@ -131,6 +142,7 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
       orderBy: { id: "asc" },
       include: {
         bloco: true,
+        especialidade: true,
         periods: {
           where: {
             end: { gte: agoraUTC.toJSDate() },
@@ -155,7 +167,7 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
             reqHorario.horaInicio,
             reqHorario.horaFim,
             recorrente,
-            maxTimeRecorrente,
+            maxTimeRecorrente ?? null,
             dbPeriod.start,
             dbPeriod.end,
             dbPeriod.isRecurring,
@@ -188,6 +200,7 @@ export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
         nome: s.ID_Ambiente,
         tipo: s.tipo ?? "",
         ala: s.bloco.nome,
+        especialidadeRoom: s.especialidade.nome,
         status: s.active ? "active" : "inactive",
       })),
       meta: {
@@ -289,7 +302,7 @@ export const agendarSala = async (req: Request, res: Response) => {
           horaInicio,
           horaFim,
           recorrente,
-          maxTimeRecorrente,
+          maxTimeRecorrente ?? null,
           dbPeriod.start,
           dbPeriod.end,
           dbPeriod.isRecurring,
@@ -330,13 +343,14 @@ export const agendarSala = async (req: Request, res: Response) => {
 
       let maxUTC: Date | null = null;
 
-      if (recorrente && maxTimeRecorrente > 0) {
-        maxUTC = inicioUTC
-          .plus({ months: maxTimeRecorrente })
+      if (recorrente && maxTimeRecorrente) {
+        maxUTC = DateTime
+          .fromISO(maxTimeRecorrente, { zone: TZ })
           .endOf("day")
           .toUTC()
           .toJSDate();
       }
+
 
       return {
         roomId: salaId,
@@ -490,27 +504,18 @@ export async function cancelarReserva(req: Request, res: Response) {
     // 🔐 PERMISSÕES
     // =========================
 
-    if (usuario.hierarquia === "admin") {
-      // admin só pode cancelar o que ELE criou
-      if (reserva.createdById !== userId) {
-        return res.status(403).json({
-          error: "Admin só pode cancelar reservas que ele criou",
-        });
-      }
-    } else {
-      // user só pode cancelar reserva agendada PARA ele
+    if (usuario.hierarquia === "user") {
       if (reserva.scheduledForId !== userId) {
         return res.status(403).json({
           error: "Você não pode cancelar esta reserva",
         });
       }
-
-      // user não pode cancelar se já começou
-      if (reserva.start <= agora) {
-        return res.status(400).json({
-          error: "Não é possível cancelar uma reserva já iniciada",
-        });
-      }
+    }
+      
+    if (reserva.start <= agora) {
+      return res.status(400).json({
+        error: "Não é possível cancelar uma reserva já iniciada",
+      });
     }
 
     // =========================

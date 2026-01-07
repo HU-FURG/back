@@ -113,7 +113,7 @@ export function verificarConflitoUniversal(
   reqHoraInicio: string,    // "HH:mm"
   reqHoraFim: string,       // "HH:mm"
   reqIsRecorrente: boolean,
-  reqMaxMeses: number,      // SE FOR 0 = INFINITO
+  reqMaxRecurrenceEnd: string | null, 
 
   // --- DADOS DO BANCO ---
   dbStart: Date,            
@@ -135,17 +135,18 @@ export function verificarConflitoUniversal(
   let reqVigenciaFim: DateTime;
 
   if (reqIsRecorrente) {
-      // Se for 0, significa "sem limite" (Infinito) -> Jogamos 100 anos pra frente
-      if (reqMaxMeses === 0) {
-          reqVigenciaFim = reqInicioDT.plus({ years: 100 }).endOf('day');
-      } else {
-          // Se tiver valor (ex: 6 meses), soma os meses
-          reqVigenciaFim = reqInicioDT.plus({ months: reqMaxMeses }).endOf('day');
-      }
+    if (!reqMaxRecurrenceEnd) {
+      // recorrência infinita
+      reqVigenciaFim = reqInicioDT.plus({ years: 100 }).endOf("day");
+    } else {
+      reqVigenciaFim = DateTime
+        .fromISO(reqMaxRecurrenceEnd, { zone: TZ })
+        .endOf("day");
+    }
   } else {
-      // Se não é recorrente, morre no mesmo dia
-      reqVigenciaFim = reqInicioDT.endOf('day');
+    reqVigenciaFim = reqInicioDT.endOf("day");
   }
+
 
   // --------------------------------------------------------
   // PREPARAÇÃO DO BANCO (DB)
@@ -170,9 +171,9 @@ export function verificarConflitoUniversal(
 
   // LOGS PARA CONFERIR SE O ZERO VIROU "FUTURO"
   /**/
-  console.log(`\n🔍 [VIGÊNCIA DEBUG]`);
-  console.log(`   Req (${reqIsRecorrente ? 'Rec' : 'Único'} | Meses: ${reqMaxMeses}): ${reqVigenciaInicio.toISODate()} até ${reqVigenciaFim.toISODate()}`);
-  console.log(`   DB  (${dbIsRecorrente  ? 'Rec' : 'Único'}): ${dbInicioDT.toISODate()} até ${dbVigenciaFim.toISODate()}`);
+  // console.log(`\n🔍 [VIGÊNCIA DEBUG]`);
+  // console.log(`   Req (${reqIsRecorrente ? 'Rec' : 'Único'} | Meses: ${reqMaxMeses}): ${reqVigenciaInicio.toISODate()} até ${reqVigenciaFim.toISODate()}`);
+  // console.log(`   DB  (${dbIsRecorrente  ? 'Rec' : 'Único'}): ${dbInicioDT.toISODate()} até ${dbVigenciaFim.toISODate()}`);
   
 
   // =======================================================================
