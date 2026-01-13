@@ -1,107 +1,139 @@
-import { PrismaClient } from "@prisma/client"
-import { DateTime } from "luxon"
+import { PrismaClient } from "@prisma/client";
+import { DateTime } from "luxon";
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
+const TZ = "America/Sao_Paulo";
 
 async function main() {
-  console.log("🔎 Buscando usuários e salas...")
+  console.log("🔎 Buscando usuários e salas...");
 
   const admin = await prisma.user.findFirst({
     where: { hierarquia: "admin" },
-  })
+  });
 
   if (!admin) {
-    console.log("❌ Nenhum admin encontrado.")
-    return
+    console.log("❌ Nenhum admin encontrado.");
+    return;
   }
 
   const users = await prisma.user.findMany({
     where: { hierarquia: "user" },
-  })
+  });
 
-  const rooms = await prisma.room.findMany()
+  const rooms = await prisma.room.findMany();
 
-  console.log(`👥 ${users.length} usuários | 🏢 ${rooms.length} salas`)
+  console.log(`👥 ${users.length} usuários | 🏢 ${rooms.length} salas`);
 
-  if (users.length === 0 || rooms.length === 0) {
-    console.log("❌ Seed abortado: usuários ou salas inexistentes.")
-    return
+  if (!users.length || !rooms.length) {
+    console.log("❌ Seed abortado: usuários ou salas inexistentes.");
+    return;
   }
 
-  await prisma.roomPeriod.deleteMany()
-  console.log("🧹 Reservas antigas apagadas.")
+  await prisma.roomPeriod.deleteMany();
+  console.log("🧹 Reservas antigas apagadas.");
 
-  const hoje = new Date()
-  const startOfWeek = new Date(hoje)
-  startOfWeek.setDate(startOfWeek.getDate() - hoje.getDay() + 1) // segunda
+  const startOfWeek = DateTime.now()
+    .setZone(TZ)
+    .startOf("week");
 
-  let criados = 0
+  let criados = 0;
 
   for (let dia = 0; dia < 5; dia++) {
-    const dataBase = new Date(startOfWeek)
-    dataBase.setDate(startOfWeek.getDate() + dia)
+    const dayBase = startOfWeek.plus({ days: dia });
 
     for (const user of users) {
-      const isMorning = Math.random() < 0.5
-      const startHour = isMorning ? 8 : 13
-      const endHour = isMorning ? 12 : 17
+      // =========================
+      // HORÁRIO REALISTA
+      // =========================
+      const startHour =
+        Math.random() < 0.5
+          ? 8 + Math.floor(Math.random() * 3)   // 08–10
+          : 13 + Math.floor(Math.random() * 3); // 13–15
 
-      const startLocal = new Date(dataBase)
-      const endLocal = new Date(dataBase)
+      const endHour = startHour + 4;
 
-      startLocal.setHours(startHour, 0, 0, 0)
-      endLocal.setHours(endHour, 0, 0, 0)
+      const startLocal = dayBase.set({
+        hour: startHour,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      });
 
-      const start = DateTime.fromJSDate(startLocal, { zone: "America/Sao_Paulo" })
-        .toUTC()
-        .toJSDate()
+      const endLocal = dayBase.set({
+        hour: endHour,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      });
 
-      const end = DateTime.fromJSDate(endLocal, { zone: "America/Sao_Paulo" })
-        .toUTC()
-        .toJSDate()
+      const weekday = startLocal.weekday;
 
-      const sala = rooms[Math.floor(Math.random() * rooms.length)]
-      const isRecurring = Math.random() < 0.8
+      const startUTC = startLocal.toUTC().toJSDate();
+      const endUTC = endLocal.toUTC().toJSDate();
 
-      const conflito = await prisma.roomPeriod.findFirst({
-        where: {
-          roomId: sala.id,
-          start: { lt: end },
-          end: { gt: start },
-        },
-      })
+      const isRecurring = Math.random() < 0.7;
 
-      const salaFinal = conflito
-        ? rooms[Math.floor(Math.random() * rooms.length)]
-        : sala
+      // =========================
+      // TENTAR ACHAR SALA LIVRE
+      // =========================
+      let salaFinal = null;
+
+      for (const sala of rooms) {
+        const conflito = await prisma.roomPeriod.findFirst({
+          where: {
+            roomId: sala.id,
+            weekday,
+            start: { lt: endUTC },
+            end: { gt: startUTC },
+            OR: [
+              { isRecurring: false },
+              {
+                isRecurring: true,
+                OR: [
+                  { maxScheduleTime: null },
+                  { maxScheduleTime: { gte: startUTC } },
+                ],
+              },
+            ],
+          },
+        });
+
+        if (!conflito) {
+          salaFinal = sala;
+          break;
+        }
+      }
+
+      // Se nenhuma sala estiver livre, pula
+      if (!salaFinal) continue;
 
       await prisma.roomPeriod.create({
         data: {
           roomId: salaFinal.id,
-
-          // 🔑 NOVO MODELO
           createdById: admin.id,
           scheduledForId: user.id,
 
-          start,
-          end,
+          start: startUTC,
+          end: endUTC,
+          weekday,
+
           isRecurring,
           approved: true,
         },
-      })
+      });
 
-      criados++
+      criados++;
     }
   }
 
-  console.log(`✅ ${criados} agendamentos criados com sucesso!`)
+  console.log(`✅ ${criados} agendamentos criados com sucesso!`);
 }
 
 main()
   .catch((e) => {
-    console.error("🔥 ERRO NO SEED:", e)
-    process.exit(1)
+    console.error("🔥 ERRO NO SEED:", e);
+    process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect()
-  })
+    await prisma.$disconnect();
+  });

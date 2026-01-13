@@ -32,20 +32,52 @@ export async function listScheduling(req: Request, res: Response) {
     const pageSize = 12;
     const currentPage = parseInt(page || "1", 10);
     const skip = (currentPage - 1) * pageSize;
+    
+    const TZ = "America/Sao_Paulo"
 
     const agora = new Date();
 
     // =====================
     // FILTRO DE DATA
     // =====================
-    const baseDate = date ?? agora.toISOString().split("T")[0];
+    const base = date
+      ? DateTime.fromISO(date, { zone: TZ })
+      : DateTime.now().setZone(TZ)
+
+    const startOfDay = base.startOf("day").toJSDate()
+    const endOfDay = base.endOf("day").toJSDate()
 
     const filters: any = {
-      start: {
-        gte: new Date(`${baseDate}T00:00:00`),
-        lte: new Date(`${baseDate}T23:59:59`),
+    OR: [
+      // 🔹 NÃO recorrente → data exata
+      {
+        isRecurring: false,
+        start: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
       },
-    };
+
+      // 🔹 Recorrente → ocorre nesse dia + válido no período
+      {
+        isRecurring: true,
+
+        // ocorre neste dia específico
+        weekday: base.weekday,
+
+        // intervalo de validade
+        start: {
+          lte: endOfDay,
+        },
+
+        OR: [
+          { maxScheduleTime: null },
+          { maxScheduleTime: { gte: startOfDay } },
+        ],
+      },
+    ],
+  }
+
 
     // =====================
     // FILTROS DA SALA
@@ -60,7 +92,7 @@ export async function listScheduling(req: Request, res: Response) {
       roomFilters.blocoId = bloco;
     }
 
- const where: any = {
+  const where: any = {
       ...filters,
 
       ...(Object.keys(roomFilters).length && {
@@ -99,8 +131,6 @@ export async function listScheduling(req: Request, res: Response) {
         ],
       }),
     };
-
-
 
     // =====================
     // TOTAL

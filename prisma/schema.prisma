@@ -108,6 +108,7 @@ model RoomPeriod {
 
   start       DateTime
   end         DateTime
+  weekday     Int?
 
   maxScheduleTime DateTime?
 

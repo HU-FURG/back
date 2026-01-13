@@ -225,6 +225,7 @@ export const agendarSala = async (req: Request, res: Response) => {
     const authUser = (req as any).user;
 
     const body = AgendamentoSchema.parse(req.body);
+
     const {
       salaId,
       scheduledForId,
@@ -262,7 +263,7 @@ export const agendarSala = async (req: Request, res: Response) => {
         where: { id: scheduledForId },
         select: {
           id: true,
-          especialidadeId: true, // 🔮 já preparando futuro
+          especialidadeId: true, 
           active: true,
         },
       });
@@ -333,13 +334,18 @@ export const agendarSala = async (req: Request, res: Response) => {
     // 6️⃣ Criar registros
     // =========================
     const registros = horarios.map(({ data, horaInicio, horaFim }) => {
-      const inicioUTC = DateTime.fromISO(`${data}T${horaInicio}`, {
+
+      const inicioLocal = DateTime.fromISO(`${data}T${horaInicio}`, {
         zone: TZ,
-      }).toUTC();
+      })
+
+      const inicioUTC = inicioLocal.toUTC();
 
       const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, {
         zone: TZ,
       }).toUTC();
+
+      const weekday = inicioLocal.weekday
 
       let maxUTC: Date | null = null;
 
@@ -358,6 +364,7 @@ export const agendarSala = async (req: Request, res: Response) => {
         scheduledForId: finalScheduledForId,
         start: inicioUTC.toJSDate(),
         end: fimUTC.toJSDate(),
+        weekday,
         isRecurring: recorrente,
         maxScheduleTime: maxUTC,
         approved,
@@ -385,7 +392,6 @@ export const agendarSala = async (req: Request, res: Response) => {
     });
   }
 };
-
 
 
 // ===============================

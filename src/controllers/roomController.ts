@@ -9,7 +9,6 @@ import { DateTime } from 'luxon';
 
 
 // ✅ Criação de sala
-// ✅ Criação de sala
 export async function createRoom(req: Request, res: Response) {
   const schema = z.object({
     number: z.string().min(0),
@@ -82,8 +81,6 @@ export async function createRoom(req: Request, res: Response) {
   }
 }
 
-
-// ✅ Listar salas
 // ✅ Listar salas
 export async function listRooms(req: Request, res: Response) {
   try {
@@ -423,35 +420,35 @@ export async function deleteRooms(req: Request, res: Response) {
 
 // ✅ Obter agenda de uma sala
 export async function getRoomSchedule(req: Request, res: Response) {
-  const userId = (req as any).user?.userId;
-  const { roomId } = req.params;
+  const userId = (req as any).user?.userId
+  const { roomId } = req.params
 
   if (!userId) {
-    return res.status(401).json({ error: "Usuário não autenticado" });
+    return res.status(401).json({ error: "Usuário não autenticado" })
   }
 
-  const roomIdNumber = Number(roomId);
-  if (!roomId || Number.isNaN(roomIdNumber)) {
-    return res.status(400).json({ message: "ID da sala inválido." });
+  const roomIdNumber = Number(roomId)
+  if (Number.isNaN(roomIdNumber)) {
+    return res.status(400).json({ message: "ID da sala inválido." })
   }
 
   try {
-    // =========================
-    // PERFIL DO USUÁRIO
-    // =========================
-    const usuario = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { hierarquia: true },
-    });
-
-    const isAdmin = usuario?.hierarquia === "admin";
-
-    // =========================
-    // BUSCAR RESERVAS DA SALA
-    // =========================
     const reservations = await prisma.roomPeriod.findMany({
       where: { roomId: roomIdNumber },
       include: {
+        room: {
+          select: {
+            id: true,
+            ID_Ambiente: true,
+            tipo: true,
+            bloco: {
+              select: {
+                id: true,
+                nome: true,
+              },
+            },
+          },
+        },
         scheduledFor: {
           select: {
             id: true,
@@ -468,60 +465,63 @@ export async function getRoomSchedule(req: Request, res: Response) {
         },
       },
       orderBy: { start: "asc" },
-    });
+    })
 
-    // =========================
-    // FORMATAR RESPOSTA
-    // =========================
     const formattedSchedule = reservations.map((r) => {
-      const startDT = DateTime.fromJSDate(r.start).setZone(
-        "America/Sao_Paulo"
-      );
-      const endDT = DateTime.fromJSDate(r.end).setZone(
-        "America/Sao_Paulo"
-      );
+      const startDT = DateTime
+        .fromJSDate(r.start)
+        .setZone("America/Sao_Paulo")
 
-      const dayOfWeek = startDT.weekday; // 1 (seg) → 7 (dom)
+      const endDT = DateTime
+        .fromJSDate(r.end)
+        .setZone("America/Sao_Paulo")
 
       return {
         id: r.id,
-        dayOfWeek,
 
-        // horários formatados
+        // opcional (recorrente)
+        dayOfWeek: r.isRecurring ? startDT.weekday : undefined,
+
         startTime: startDT.toFormat("HH:mm"),
         endTime: endDT.toFormat("HH:mm"),
 
-        // dados de controle
+        start: startDT.toISO(),
+        end: endDT.toISO(),
+
         isRecurring: r.isRecurring,
         approved: r.approved,
-
-        // datas completas
-        start: r.start,
-        end: r.end,
         maxScheduleTime: r.maxScheduleTime,
 
-        // 🔒 apenas admin vê
-        ...(isAdmin && {
-          scheduledFor:
-            r.scheduledFor?.nome ??
-            r.scheduledFor?.login ??
-            null,
-          scheduledForId: r.scheduledForId,
-          createdBy:
-            r.createdBy?.login ??
-            r.createdBy?.nome ??
-            null,
-          createdById: r.createdById,
-        }),
-      };
-    });
+        room: {
+          id: r.room.id,
+          ID_Ambiente: r.room.ID_Ambiente,
+          tipo: r.room.tipo,
+          bloco: {
+            id: r.room.bloco.id,
+            nome: r.room.bloco.nome,
+          },
+        },
 
-    return res.status(200).json(formattedSchedule);
+        createdBy: {
+          id: r.createdBy.id,
+          login: r.createdBy.login,
+          nome: r.createdBy.nome,
+        },
+
+        scheduledFor: r.scheduledFor ? {
+          id: r.scheduledFor.id,
+          login: r.scheduledFor.login,
+          nome: r.scheduledFor.nome,
+        } : null,
+      }
+    })
+
+    return res.status(200).json(formattedSchedule)
   } catch (error) {
-    console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
+    console.error(`Erro ao buscar agenda da sala ${roomId}:`, error)
     return res.status(500).json({
       error: "Erro interno do servidor ao buscar a agenda.",
-    });
+    })
   }
 }
 
@@ -536,7 +536,7 @@ export async function getBlockDayGrade(req: Request, res: Response) {
   }
 
   const blocoId = Number(block);
-  if (!blocoId || Number.isNaN(blocoId)) {
+  if (Number.isNaN(blocoId)) {
     return res.status(400).json({ message: "Bloco inválido." });
   }
 
@@ -545,30 +545,10 @@ export async function getBlockDayGrade(req: Request, res: Response) {
   }
 
   try {
-    // =========================
-    // TIMEZONE CORRETO
-    // =========================
-    const startOfDay = DateTime.fromISO(date, {
-      zone: "America/Sao_Paulo",
-    })
-      .startOf("day")
-      .toJSDate();
+    const dia = DateTime.fromISO(date, { zone: "America/Sao_Paulo" });
 
-    const endOfDay = DateTime.fromISO(date, {
-      zone: "America/Sao_Paulo",
-    })
-      .endOf("day")
-      .toJSDate();
-
-    // =========================
-    // PERFIL DO USUÁRIO
-    // =========================
-    const usuario = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { hierarquia: true },
-    });
-
-    const isAdmin = usuario?.hierarquia === "admin";
+    const startOfDay = dia.startOf("day").toJSDate();
+    const endOfDay = dia.endOf("day").toJSDate();
 
     // =========================
     // SALAS DO BLOCO
@@ -590,69 +570,116 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     const roomIds = rooms.map((r) => r.id);
 
     // =========================
-    // BUSCA ÚNICA DE RESERVAS
+    // BUSCA CANDIDATA DE RESERVAS
     // =========================
+    const base = dia;
+
     const reservas = await prisma.roomPeriod.findMany({
       where: {
         roomId: { in: roomIds },
-        start: { lte: endOfDay },
-        end: { gte: startOfDay },
+
+        OR: [
+          // 🔹 NÃO recorrente → data exata
+          {
+            isRecurring: false,
+            start: {
+              gte: startOfDay,
+              lte: endOfDay,
+            },
+          },
+
+          // 🔹 Recorrente → weekday + validade
+          {
+            isRecurring: true,
+            weekday: base.weekday,
+            start: { lte: endOfDay },
+            OR: [
+              { maxScheduleTime: null },
+              { maxScheduleTime: { gte: startOfDay } },
+            ],
+          },
+        ],
       },
+
       include: {
         scheduledFor: {
-          select: {
-            id: true,
-            login: true,
-            nome: true,
-          },
+          select: { id: true, login: true, nome: true },
         },
         createdBy: {
-          select: {
-            login: true,
-          },
+          select: { login: true },
         },
       },
+
       orderBy: { start: "asc" },
     });
 
     // =========================
-    // AGRUPAR POR SALA
+    // FILTRO LÓGICO + PROJEÇÃO
     // =========================
-    const reservasPorSala = reservas.reduce<
-      Record<number, any[]>
-    >((acc, r) => {
-      if (!acc[r.roomId]) acc[r.roomId] = [];
-      acc[r.roomId].push(r);
-      return acc;
-    }, {});
+    type Reserva = typeof reservas[number];
+    const reservasPorSala: Record<number, Reserva[]> = {};
+
+    for (const resv of reservas) {
+      const inicio = DateTime.fromJSDate(resv.start).setZone("America/Sao_Paulo");
+      const fimOriginal = DateTime.fromJSDate(resv.end).setZone("America/Sao_Paulo");
+
+      const startProjetado = dia.set({
+        hour: inicio.hour,
+        minute: inicio.minute,
+        second: 0,
+        millisecond: 0,
+      }).toJSDate();
+
+      const endProjetado = dia.set({
+        hour: fimOriginal.hour,
+        minute: fimOriginal.minute,
+        second: 0,
+        millisecond: 0,
+      }).toJSDate();
+
+      const reservaFinal = {
+        ...resv,
+        start: startProjetado,
+        end: endProjetado,
+      };
+
+      if (!reservasPorSala[resv.roomId]) {
+        reservasPorSala[resv.roomId] = [];
+      }
+
+      reservasPorSala[resv.roomId].push(reservaFinal);
+    }
 
     // =========================
-    // MONTA RESULTADO FINAL
+    // MONTA RESPOSTA FINAL
     // =========================
     const salas = rooms.map((room) => ({
       roomId: room.id,
       sala: room.ID_Ambiente,
-      horarios: (reservasPorSala[room.id] ?? []).map((res) => ({
-        id: res.id,
-        startTime: DateTime.fromJSDate(res.start)
-          .setZone("America/Sao_Paulo")
-          .toFormat("HH:mm"),
-        endTime: DateTime.fromJSDate(res.end)
-          .setZone("America/Sao_Paulo")
-          .toFormat("HH:mm"),
-        start: res.start,
-        end: res.end,
-        isRecurring: res.isRecurring,
-        approved: res.approved,
-        maxScheduleTime: res.maxScheduleTime,
+      horarios: (reservasPorSala[room.id] ?? []).map((resv) => ({
+        id: resv.id,
 
-        ...(isAdmin && {
-          scheduledFor:
-            res.scheduledFor?.nome ??
-            res.scheduledFor?.login ??
-            null,
-          createdBy: res.createdBy?.login ?? null,
-        }),
+        startTime: DateTime.fromJSDate(resv.start)
+          .setZone("America/Sao_Paulo")
+          .toFormat("HH:mm"),
+
+        endTime: DateTime.fromJSDate(resv.end)
+          .setZone("America/Sao_Paulo")
+          .toFormat("HH:mm"),
+
+        start: resv.start,
+        end: resv.end,
+
+        isRecurring: resv.isRecurring,
+        approved: resv.approved,
+        maxScheduleTime: resv.maxScheduleTime,
+
+        scheduledFor:
+          resv.scheduledFor?.nome ??
+          resv.scheduledFor?.login ??
+          null,
+
+        createdBy: resv.createdBy?.login ?? null,
       })),
     }));
 
@@ -662,7 +689,11 @@ export async function getBlockDayGrade(req: Request, res: Response) {
       salas,
     });
   } catch (error) {
-    console.error(`Erro ao buscar agenda do bloco ${block}:`, error);
+    console.error(
+      `Erro ao buscar agenda do bloco ${block}:`,
+      error
+    );
+
     return res.status(500).json({
       error: "Erro interno ao buscar a agenda.",
     });
