@@ -10,7 +10,7 @@ const PcMonitorEventSchema = zod.object({
     "encerrou",
   ]),
   alvo: zod.string().optional(),
-  timestamp: zod.string().datetime(),
+  timestamp: zod.coerce.date(), // ✅ normaliza aqui
 })
 
 const PcMonitorEventListSchema = zod
@@ -26,10 +26,10 @@ export async function storeRoomMonitorEvent(
       req.body.sessoes
     )
 
+    // agora timestamp já é Date
     payloadList.sort(
       (a, b) =>
-        new Date(a.timestamp).getTime() -
-        new Date(b.timestamp).getTime()
+        a.timestamp.getTime() - b.timestamp.getTime()
     )
 
     await prisma.$transaction(async (tx) => {
@@ -37,9 +37,9 @@ export async function storeRoomMonitorEvent(
         await tx.pcUsageEvent.create({
           data: {
             roomIdAmbiente: payload.sala,
-            eventType: payload.evento, // 🔥 agora direto
+            eventType: payload.evento,
             targetApp: payload.alvo ?? null,
-            eventTime: new Date(payload.timestamp)
+            eventTime: payload.timestamp, // ✅ direto
           },
         })
       }
@@ -52,7 +52,7 @@ export async function storeRoomMonitorEvent(
   } catch (error: any) {
     console.error("Erro monitoramento batch:", error)
 
-    if (error.issues) {
+    if (error?.issues) {
       return res.status(400).json({
         message: "Payload inválido",
         details: error.issues,
