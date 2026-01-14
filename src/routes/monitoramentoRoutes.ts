@@ -6,6 +6,6 @@ const router = Router();
 //------------------------------------------------
 // Monitoramento - Salas Ativas
 //------------------------------------------------
-router.get('/rooms/active', storeRoomMonitorEvent);
+router.post('/info', storeRoomMonitorEvent);
 
 export default router;
