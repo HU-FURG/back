@@ -13,6 +13,12 @@ enum Hierarquia {
   user
 }
 
+enum PcEventType {
+  iniciou
+  usou
+  encerrou
+}
+
 model SystemLog { //controle do sistema
   id           Int      @id @default(autoincrement())
   key          String   @unique
@@ -95,6 +101,26 @@ model Room {
   especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 
   periods RoomPeriod[]
+}
+
+model PcUsageEvent {
+  id Int @id @default(autoincrement())
+
+  // =========================
+  // ORIGEM
+  // =========================
+  roomIdAmbiente String      // "x"
+  eventType      PcEventType // iniciou | usou | encerrou
+  targetApp      String?     // chrome.exe
+
+  // =========================
+  // TEMPO
+  // =========================
+  eventTime DateTime
+
+  createdAt  DateTime @default(now())
+
+  @@index([roomIdAmbiente, eventTime])
 }
 
 

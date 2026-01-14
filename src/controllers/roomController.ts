@@ -4,7 +4,7 @@ import { prisma } from '../prisma/client';
 import { z } from 'zod';
 import { debugLog } from '../auxiliar/debugLog';
 import { Prisma, RoomPeriod } from '@prisma/client';
-import { cancelAndArchivePeriods, checkActiveRoomConflicts, TransactionClient } from '../auxiliar/roomAuxi';
+import { cancelAndArchivePeriods, checkActiveRoomConflicts } from '../auxiliar/roomAuxi';
 import { DateTime } from 'luxon';
 
 

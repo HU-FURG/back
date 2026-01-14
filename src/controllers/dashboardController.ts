@@ -219,7 +219,9 @@ async getGeneralStats(req: Request, res: Response) {
       // 2. Conta TOTAL DE SALAS ATIVAS 
       const totalRoomsCount = await prisma.room.count({
         where: {
-            bloco: block && block !== "Todos" ? block : undefined,
+            bloco: {
+                nome: block && block !== "Todos" ? block : undefined
+            },
             active: true 
         }
       });
@@ -402,7 +404,7 @@ async getGeneralStats(req: Request, res: Response) {
         return {
             id: room.id,
             ID_Ambiente: room.ID_Ambiente,
-            bloco: room.bloco,
+            bloco: room.blocoId,
             especialidade: room.especialidadeId,
             tipo: room.tipo,
             banheiro: room.banheiro,
@@ -554,25 +556,62 @@ async getGeneralStats(req: Request, res: Response) {
     }
   }
 
-  async searchUniversal(req: Request, res: Response) {
+async searchUniversal(req: Request, res: Response) {
     try {
-        const termo = String(req.query.termo || "").trim();
-        if (!termo) return res.json([]);
-        const rooms = await prisma.room.findMany({
-            where: { OR: [{ ID_Ambiente: { contains: termo, mode: 'insensitive' } }, { bloco: { contains: termo, mode: 'insensitive' } }] },
-            take: 3, select: { ID_Ambiente: true }
-        });
-        const users = await prisma.user.findMany({
-            where: { nome: { contains: termo, mode: 'insensitive' } },
-            take: 3, select: { nome: true }
-        });
-        const results = [
-            ...rooms.map(r => ({ label: `Sala: ${r.ID_Ambiente}`, value: r.ID_Ambiente, type: 'room' })),
-            ...users.map(u => ({ label: `Usuário: ${u.nome}`, value: u.nome, type: 'user' }))
-        ];
-        return res.json(results);
+      const termo = String(req.query.termo || "").trim();
+      if (!termo) return res.json([]);
+
+      const rooms = await prisma.room.findMany({
+        where: {
+          OR: [
+            {
+              ID_Ambiente: {
+                contains: termo,
+                mode: 'insensitive'
+              }
+            },
+            {
+              bloco: {
+                nome: {
+                  contains: termo,
+                  mode: 'insensitive'
+                }
+              }
+            }
+          ]
+        },
+        take: 3,
+        select: { ID_Ambiente: true }
+      });
+
+      const users = await prisma.user.findMany({
+        where: {
+          nome: {
+            contains: termo,
+            mode: 'insensitive'
+          }
+        },
+        take: 3,
+        select: { nome: true }
+      });
+
+      const results = [
+        ...rooms.map(r => ({
+          label: `Sala: ${r.ID_Ambiente}`,
+          value: r.ID_Ambiente,
+          type: 'room'
+        })),
+        ...users.map(u => ({
+          label: `Usuário: ${u.nome}`,
+          value: u.nome,
+          type: 'user'
+        }))
+      ];
+
+      return res.json(results);
     } catch (error) {
-        return res.status(400).json([]);
+      console.error(error);
+      return res.status(400).json([]);
     }
   }
 }

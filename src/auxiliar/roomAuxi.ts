@@ -7,7 +7,12 @@ interface ConflictResponse {
   conflict: true;
   message: string;
   isRecurring: boolean;
-  periods: { id: number; nome: string; start: Date; end: Date }[];
+  periods: {
+    id: number;
+    start: Date;
+    end: Date;
+    scheduledForId: number | null;
+  }[];
 }
 
 /**
@@ -25,11 +30,10 @@ export async function checkActiveRoomConflicts(
     orderBy: { start: 'asc' },
     select: {
       id: true,
-      nome: true,
       start: true,
       end: true,
       isRecurring: true,
-      userId: true,
+      scheduledForId: true,
     },
   });
 
@@ -38,7 +42,9 @@ export async function checkActiveRoomConflicts(
   const isRecurringConflict = activePeriods.some(p => p.isRecurring);
 
   let warningMessage = `A sala possui ${activePeriods.length} reserva(s) ativa(s) a partir de hoje.`;
-  if (isRecurringConflict) warningMessage += ' Pelo menos uma delas é RECORRENTE.';
+  if (isRecurringConflict) {
+    warningMessage += ' Pelo menos uma delas é RECORRENTE.';
+  }
   warningMessage += ' Confirme a operação para cancelar todas as reservas futuras e prosseguir.';
 
   return {
@@ -47,12 +53,13 @@ export async function checkActiveRoomConflicts(
     isRecurring: isRecurringConflict,
     periods: activePeriods.map(p => ({
       id: p.id,
-      nome: p.nome,
       start: p.start,
       end: p.end,
+      scheduledForId: p.scheduledForId,
     })),
   };
 }
+
 
 export type TransactionClient = Omit<
   PrismaClient,
@@ -73,7 +80,7 @@ type RoomForArchive = {
 export async function cancelAndArchivePeriods(
   reason: string,
   tx: TransactionClient,
-  activePeriods: ({ userId: number | null } & RoomPeriod)[],
+  activePeriods: RoomPeriod[],
   existingRoom: RoomForArchive
 ): Promise<void> {
   for (const period of activePeriods) {
@@ -83,18 +90,19 @@ export async function cancelAndArchivePeriods(
 
     await tx.roomScheduleTemplate.create({
       data: {
-        userId: period.userId ?? undefined,
-        nome: period.nome,
+        userId: period.scheduledForId ?? undefined,
+        nome: `Reserva cancelada (${existingRoom.ID_Ambiente})`,
         durationInMinutes,
         roomIdAmbiente: existingRoom.ID_Ambiente,
-        roomBloco: existingRoom.bloco.nome, // ✅ agora correto
+        roomBloco: existingRoom.bloco.nome,
         originalStart: period.start,
         originalEnd: period.end,
         reason: reason ?? 'CANCELADO_ADMIN',
-        archivedAt: new Date(),
       },
     });
 
-    await tx.roomPeriod.delete({ where: { id: period.id } });
+    await tx.roomPeriod.delete({
+      where: { id: period.id },
+    });
   }
 }

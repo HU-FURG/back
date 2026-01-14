@@ -15,6 +15,7 @@ import userRoutes from './routes/userRoutes'
 import schedulingRoutes from './routes/schedulingRouter'
 import rescheduleRouter from './routes/rescheduleRouter'
 import configRoutes from './routes/configRoutes'
+import monitorRoutes from './routes/monitoramentoRoutes'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
@@ -46,6 +47,8 @@ app.use('/api', userRoutes); // sistema login get users CRUD usuarios
 app.use('/api', dashboardRoutes) // dashboard
 app.use('/api/config', configRoutes) // dashboard
 app.use('/api/scheduling', schedulingRoutes) // gerenciamento de agendamentos
+
+app.use('/api/monitor', monitorRoutes) // monitoramento
 app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
 
 app.get('/health', (req, res) => res.sendStatus(200)); // rota de verificação de deploy
