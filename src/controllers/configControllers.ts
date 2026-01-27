@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { prisma } from "../prisma/client";
 import { z } from "zod";
 import bcrypt from "bcrypt";
+import { DateTime } from "luxon";
+import { validateUserPayload } from "../auxiliar/validarUser";
 
 //------------------------------------------------
 // Room Filters blocos e especialidades para typagem
@@ -39,9 +41,61 @@ export async function getRoomFilters(req: Request, res: Response) {
 // Users
 //------------------------------------------------
 export async function listUsers(req: Request, res: Response) {
+  const userAuth = (req as any).user;
+
   const users = await prisma.user.findMany({
-    include: { especialidade: true },
+     where: {
+      active: true,
+      id: { not: userAuth.id }},
+    select: {
+      id: true,
+      login: true,
+      nome: true,
+      email: true,
+      telefone: true,
+      hierarquia: true,
+      active: true,
+      descricao: true,
+      especialidade: {
+        select: {
+          id: true,
+          nome: true
+        }
+      },
+    },
   });
+
+  const admins = users.filter(u => u.hierarquia === 'admin')
+  const usersComuns = users.filter(u => u.hierarquia === 'user')
+
+  return res.json({ data: {admins, usersComuns} });
+}
+
+export async function listUsersDesactive(req: Request, res: Response) {
+  const userAuth = (req as any).user;
+  const users = await prisma.user.findMany({
+    where: {
+      active: false,
+      id: { not: userAuth.id }
+    },
+    select: {
+      id: true,
+      login: true,
+      nome: true,
+      email: true,
+      telefone: true,
+      hierarquia: true,
+      active: true,
+      descricao: true,
+      especialidade: {
+        select: {
+          id: true,
+          nome: true
+        }
+      },
+    },
+  });
+
 
   return res.json({ data: users });
 }
@@ -55,9 +109,16 @@ export async function createUser(req: Request, res: Response) {
     telefone: z.string().optional(),
     hierarquia: z.enum(["admin", "user"]).optional(),
     especialidadeId: z.number().optional(),
+    descricao: z.string().optional(),
   });
 
   const data = schema.parse(req.body);
+
+  const validated = await validateUserPayload(data, res, {
+    mode: "create",
+  })
+
+  if (!validated) return
 
   const hashedPassword = await bcrypt.hash(data.senha, 10);
 
@@ -72,25 +133,175 @@ export async function createUser(req: Request, res: Response) {
 }
 
 export async function editUser(req: Request, res: Response) {
-  const id = Number(req.params.id);
+  const id = Number(req.params.id)
 
   const schema = z.object({
     nome: z.string().optional(),
     email: z.string().email().optional(),
     telefone: z.string().optional(),
-    hierarquia: z.enum(["admin", "user"]).optional(),
     especialidadeId: z.number().optional(),
+    descricao: z.string().optional(),
     active: z.boolean().optional(),
-  });
+    force: z.boolean().optional(), 
+  })
 
-  const data = schema.parse(req.body);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ message: "ID inválido" })
+  }
+  
+  const data = schema.parse(req.body)
 
-  const updated = await prisma.user.update({
+  const { force, ...userData } = data
+
+  const userExists = await prisma.user.findUnique({
     where: { id },
-    data,
+  })
+
+  // validações
+  if (!userExists) {
+    return res.status(404).json({ message: "Usuário não encontrado" })
+  }
+  if (userExists.hierarquia === "admin" && data.active === false) {
+    return res.status(404).json({ message: "Não é permitido desativar um usuário admin" })
+  }
+  
+  // ===============================
+  // REGRA DE DESATIVAÇÃO
+  // ===============================
+  if (data.active === false) {
+    const TZ = "America/Sao_Paulo";
+    const agoraUTC = DateTime.now().setZone(TZ).toUTC().toJSDate();
+
+    const futureSchedules = await prisma.roomPeriod.findMany({
+      where: {
+        start: { gte: agoraUTC },
+        OR: [
+          { scheduledForId: id },
+          { createdById: id },
+        ],
+      },
+      select: { id: true, start: true },
+    })
+
+    if (futureSchedules.length > 0 && !force) {
+      return res.status(409).json({
+        code: "USER_HAS_FUTURE_SCHEDULES",
+        message:
+          "Usuário possui agendamentos futuros e não pode ser desativado.",
+        schedulesCount: futureSchedules.length,
+      })
+    }
+
+    // 🔥 FORCE = TRUE → apagar agendas futuras
+    if (futureSchedules.length > 0 && force) {
+      // 1️⃣ Buscar agendas completas
+      const schedules = await prisma.roomPeriod.findMany({
+        where: {
+          start: { gte: agoraUTC },
+          OR: [
+            { scheduledForId: id },
+            { createdById: id },
+          ],
+        },
+        include: {
+          room: true,
+        },
+      })
+
+      // 2️⃣ Criar templates de cancelamento
+      await prisma.roomScheduleTemplate.createMany({
+        data: schedules.map((s) => ({
+          userId: s.scheduledForId ?? s.createdById ?? null,
+          nome: "Agendamento cancelado",
+          durationInMinutes:
+            Math.ceil(
+              (s.end.getTime() - s.start.getTime()) / 60000,
+            ),
+
+          roomIdAmbiente: s.room.id.toString(),
+          roomBloco: s.room.blocoId.toString() ?? "-",
+
+          originalStart: s.start,
+          originalEnd: s.end,
+
+          reason: "Cancelado por desativação do usuário",
+        })),
+      })
+
+      // 3️⃣ Apagar agendas futuras
+      await prisma.roomPeriod.deleteMany({
+        where: {
+          start: { gte: agoraUTC },
+          OR: [
+            { scheduledForId: id },
+            { createdById: id },
+          ],
+        },
+      })
+    }
+  }
+  // ===============================
+  // ATUALIZA USUÁRIO
+  // ===============================
+
+  const validate = validateUserPayload(userData, res, { mode: "edit", userId: id })
+  if (!validate) return
+
+  await prisma.user.update({
+    where: { id },
+    data: userData,
   });
 
-  return res.json(updated);
+  return res.status(200).json({message: "Usuário atualizado com sucesso"});
+}
+
+export async function deleteUser(req: Request, res: Response) {
+  const id = Number(req.params.id);
+  if (Number.isNaN(id)) {
+    return res.status(400).json({ message: "ID inválido" });
+  }
+
+  const userExists = await prisma.user.findUnique({
+    where: { id },
+  });
+
+  if (!userExists) {
+    return res.status(404).json({ message: "Usuário não encontrado" });
+  }
+
+  if (userExists.hierarquia === "admin") {
+    return res.status(400).json({ message: "Não é permitido deletar um usuário admin" });
+  }
+
+  const agora = new Date()
+  const diffEmMs = agora.getTime() - userExists.createdAt.getTime()
+  const diffEmDias = diffEmMs / (1000 * 60 * 60 * 24)
+
+  if (userExists.active === true) {
+    return res.status(400).json({
+      message: "Não é permitido deletar usuários ativos",
+    })
+  }
+
+  if (diffEmDias > 30) {
+    return res.status(400).json({
+      message: "Só é permitido deletar usuários criados há menos de 30 dias",
+    })
+  }
+
+  const historicoReservas = await prisma.roomPeriod.findFirst({
+    where: { scheduledForId: id },
+  });
+
+  if (historicoReservas) {
+    return res.status(400).json({ message: "Não é permitido deletar usuários com histórico de reservas." });
+  } 
+
+  await prisma.user.delete({
+    where: { id },
+  });
+
+  return res.status(200).json({ message: "Usuário deletado com sucesso" });
 }
 
 //------------------------------------------------

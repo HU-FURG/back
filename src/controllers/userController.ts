@@ -162,42 +162,66 @@ export function logout(req: Request, res: Response) {
 }
 
 const createUserSchema = z.object({
-  login: z.string().min(3, "Login muito curto"),
-  senha: z.string().min(4, "Senha muito curta"),
-  cargo: z.enum(["admin", "user"]).optional(),
-  email: z.string().email().optional(),
+  login: z.string().min(3),
+  senha: z.string().min(6),
+  cargo: z.enum(["admin", "user"]),
   nome: z.string().optional(),
-});
+  email: z.string().email().optional(),
+  especialidadeId: z.number().optional(),
+  descricao: z.string().optional(),
+  telefone: z.string().optional(),
+})
 
-export async function createUser(req: Request, res: Response) {//verificado
+
+export async function createUser(req: Request, res: Response) {
   try {
-    console.log("Criando usuário:", req.body);
+    console.log("Criando usuário:", req.body)
 
-    const { login, senha, cargo, email, nome } = createUserSchema.parse(req.body);
+    const {
+      login,
+      senha,
+      cargo,
+      nome,
+      email,
+      especialidadeId,
+      descricao,
+      telefone,
+    } = createUserSchema.parse(req.body)
 
-    // Verifica duplicidade
-    const exists = await prisma.user.findUnique({ where: { login } });
+    // 🔎 login duplicado
+    const existingLogin = await prisma.user.findUnique({
+      where: { login },
+    })
 
+    if (existingLogin) {
+      return res
+        .status(400)
+        .json({ error: "Usuário já existe" })
+    }
+
+    // 🔎 email duplicado
     if (email) {
-      const existingEmail = await prisma.user.findUnique({ where: { email } });
+      const existingEmail =
+        await prisma.user.findUnique({
+          where: { email },
+        })
+
       if (existingEmail) {
-        console.warn("E-mail já está em uso:", email);
-        return res.status(400).json({ error: "E-mail já está em uso" });
+        return res
+          .status(400)
+          .json({ error: "E-mail já está em uso" })
       }
     }
 
-    if (exists) {
-      console.warn("Usuário já existe:", login);
-      return res.status(400).json({ error: "Usuário já existe" });
-    }
+    // 🔐 hash da senha
+    const hashedPassword = await bcrypt.hash(senha, 10)
 
-    //  Criptografa senha
-    const hashedPassword = await bcrypt.hash(senha, 10);
+    // 🧠 hierarquia
+    const hierarquia =
+      cargo === "admin"
+        ? Hierarquia.admin
+        : Hierarquia.user
 
-    //  Define hierarquia (default = user)
-    const hierarquia = cargo === "admin" ? Hierarquia.admin : Hierarquia.user;
-
-    //  Cria novo usuário
     const newUser = await prisma.user.create({
       data: {
         login,
@@ -205,24 +229,42 @@ export async function createUser(req: Request, res: Response) {//verificado
         hierarquia,
         nome: nome || login,
         email,
+        telefone,
+        descricao,
         active: true,
+        especialidadeId:
+          hierarquia === Hierarquia.admin
+            ? null
+            : especialidadeId ?? null,
       },
-    });
+      include: {
+        especialidade: true,
+      },
+    })
 
-    console.log(" Usuário criado:", newUser.login, "-", newUser.hierarquia);
-    res.status(201).json({
-      success: true,
-      login: newUser.login,
-      hierarquia: newUser.hierarquia,
-    });
+    console.log(
+      "Usuário criado:",
+      newUser.login,
+      "-",
+      newUser.hierarquia,
+    )
 
+    return res.status(201).json(newUser)
   } catch (err) {
-    console.error("Erro ao criar usuário:", err);
-    if (err instanceof z.ZodError)
-      return res.status(400).json({ error: err.errors });
-    res.status(500).json({ error: "Erro interno no servidor" });
+    console.error("Erro ao criar usuário:", err)
+
+    if (err instanceof z.ZodError) {
+      return res
+        .status(400)
+        .json({ error: err.errors })
+    }
+
+    return res
+      .status(500)
+      .json({ error: "Erro interno no servidor" })
   }
 }
+
 
 // export async function removeUser(req: Request, res: Response) { //verificado
 //   try {
@@ -311,6 +353,7 @@ export async function createUser(req: Request, res: Response) {//verificado
 const publicUserSelect = {
   id: true,
   login: true,
+  senha: false,
   nome: true,
   hierarquia: true,
   especialidadeId: true,
@@ -368,8 +411,6 @@ export async function searchUsers(req: Request, res: Response) {
 
 export async function getUsers(req: Request, res: Response) {// verificado {falta pages}
   try {
-    console.log("📋 Buscando lista de usuários...");
-
     const users = await prisma.user.findMany({
       where: { hierarquia: { not: "admin" } },
       select: { ...publicUserSelect },
