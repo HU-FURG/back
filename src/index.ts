@@ -16,6 +16,7 @@ import schedulingRoutes from './routes/schedulingRouter'
 import rescheduleRouter from './routes/rescheduleRouter'
 import configRoutes from './routes/configRoutes'
 import monitorRoutes from './routes/monitoramentoRoutes'
+import mapRoutes from  './routes/mapsRoutes'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
@@ -47,15 +48,16 @@ app.use('/api', userRoutes); // sistema login get users CRUD usuarios
 app.use('/api', dashboardRoutes) // dashboard
 app.use('/api/config', configRoutes) // dashboard
 app.use('/api/scheduling', schedulingRoutes) // gerenciamento de agendamentos
+app.use('/api/maps', mapRoutes) // gerenciamento de mapas
 
 app.use('/api/monitor', monitorRoutes) // monitoramento
 app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
 
 app.get('/health', (req, res) => res.sendStatus(200)); // rota de verificação de deploy
 
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public', 'index.html'));
-});
+// app.get('*', (req, res) => {
+//   res.sendFile(path.join(__dirname, '../public', 'index.html'));
+// });
 
 
 const PORT = Number(process.env.PORT) || 3333; 

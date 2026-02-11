@@ -80,6 +80,8 @@ model BlocoRoom {
   nome  String @unique
 
   rooms Room[]
+
+  maps Map[]
 }
 
 
@@ -102,6 +104,8 @@ model Room {
   especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 
   periods RoomPeriod[]
+
+  mapRooms MapRoom[]
 }
 
 model PcUsageEvent {
@@ -302,4 +306,35 @@ model Notification {
   createdAt     DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
+}
+
+
+// Mapas
+
+model Map {
+  id        Int    @id @default(autoincrement())
+  blocoId   Int    
+  nome      String
+  svgPath   String
+
+  // posição do mapa no frontend (para caso queira mostrar mais de um mapa)
+  posX Float
+  posY Float
+  andar Int
+
+  salas     MapRoom[]
+  
+  bloco    BlocoRoom @relation(fields: [blocoId], references: [id])
+}
+
+model MapRoom {
+  id         Int @id @default(autoincrement())
+  mapId      Int
+  roomId     Int
+  svgElementId String
+
+  map  Map  @relation(fields: [mapId], references: [id])
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@unique([mapId, roomId])
 }

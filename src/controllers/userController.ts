@@ -390,7 +390,7 @@ export async function searchUsers(req: Request, res: Response) {
         },
       },
       orderBy: { nome: "asc" },
-      take: 5, // 🔥 limite exato que você pediu
+      take: 5, 
     })
 
     return res.json(

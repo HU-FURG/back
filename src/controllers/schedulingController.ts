@@ -16,165 +16,187 @@ const agendaSchema = z.object({
   isRecurring: z.boolean().optional(),
 });
 
+//  confirma busca em page Schedule/reservas
+export async function searchUsersAndRooms(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      search: z.string().min(1),
+    })
+
+    const { search } = schema.parse(req.query)
+
+    // 1. Busca de Salas
+    const rooms = await prisma.room.findMany({
+      where: {
+        active: true,
+        ID_Ambiente: { contains: search, mode: "insensitive" }
+      },
+      select: {
+        id: true,
+        ID_Ambiente: true,
+        bloco: { select: { nome: true } }
+      },
+      take: 5 // Limite para não sobrecarregar
+    })
+
+    // 2. Busca de Usuários
+    const users = await prisma.user.findMany({
+      where: {
+        active: true,
+        hierarquia: { not: "admin" },
+        OR: [
+          { nome: { contains: search, mode: "insensitive" } },
+          { login: { contains: search, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        nome: true,
+        especialidade: { select: { nome: true } },
+      },
+      orderBy: { nome: "asc" },
+      take: 5,
+    })
+
+    const results = [
+      ...users.map((u) => ({
+        id: u.id,
+        title: u.nome,
+        subtitle: u.especialidade?.nome ?? "—",
+        type: 'user' // Identificador para o frontend
+      })),
+      ...rooms.map((r) => ({
+        id: r.id, // Salas geralmente usam o ID_Ambiente como chave
+        title: r.ID_Ambiente,
+        subtitle: r.bloco?.nome ?? "Sem Bloco",
+        type: 'room' // Identificador para o frontend
+      }))
+    ]
+
+    return res.json(results)
+
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: "Query de busca inválida" })
+    }
+    console.error("Erro ao buscar dados:", err)
+    return res.status(500).json({ error: "Erro interno ao processar busca" })
+  }
+}
+
 // Listar agendamentos futuros com filtros
 export async function listScheduling(req: Request, res: Response) {
   const schema = z.object({
     page: z.string().optional(),
     bloco: z.coerce.number().optional(),
-    number: z.string().optional(),
+    search: z.string().optional(),
+    searchtipo: z.string().optional(),
     tipo: z.string().optional(),
     date: z.string().optional(),
   });
 
   try {
-    const { page, bloco, number, tipo, date } = schema.parse(req.query);
+    const { page, bloco, search, searchtipo, tipo, date } = schema.parse(req.query);
 
     const pageSize = 12;
     const currentPage = parseInt(page || "1", 10);
     const skip = (currentPage - 1) * pageSize;
-    
-    const TZ = "America/Sao_Paulo"
 
-    const agora = new Date();
+    let where: any = {};
 
-    // =====================
-    // FILTRO DE DATA
-    // =====================
-    const base = date
-      ? DateTime.fromISO(date, { zone: TZ })
-      : DateTime.now().setZone(TZ)
+    // ==========================================================
+    // CASO A: BUSCA ESPECÍFICA (Ignora data/bloco/tipo)
+    // ==========================================================
+    if (search) {
+      if (searchtipo === "user") {
+        where = {
+          OR: [
+            { scheduledForId: parseInt(search) }, 
+          ],
+        };
+      } else if (searchtipo === "room") {
+        where = {
+          
+            OR: [
+              { roomId: parseInt(search)  }
+            ]
+          
+        };
+      } else {
+        // Fallback genérico
+        where = {
+          OR: [
+            { scheduledFor: { nome: { contains: search, mode: "insensitive" } } },
+            { room: { ID_Ambiente: { contains: search, mode: "insensitive" } } },
+          ],
+        };
+      }
+    } 
+    // ==========================================================
+    // CASO B: FILTROS NORMAIS (Data, Bloco, Tipo)
+    // ==========================================================
+    else {
+      const TZ = "America/Sao_Paulo";
+      const base = date
+        ? DateTime.fromISO(date, { zone: TZ })
+        : DateTime.now().setZone(TZ);
 
-    const startOfDay = base.startOf("day").toJSDate()
-    const endOfDay = base.endOf("day").toJSDate()
+      const startOfDay = base.startOf("day").toJSDate();
+      const endOfDay = base.endOf("day").toJSDate();
 
-    const filters: any = {
-    OR: [
-      // 🔹 NÃO recorrente → data exata
-      {
-        isRecurring: false,
-        start: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
-      },
-
-      // 🔹 Recorrente → ocorre nesse dia + válido no período
-      {
-        isRecurring: true,
-
-        // ocorre neste dia específico
-        weekday: base.weekday,
-
-        // intervalo de validade
-        start: {
-          lte: endOfDay,
-        },
-
-        OR: [
-          { maxScheduleTime: null },
-          { maxScheduleTime: { gte: startOfDay } },
-        ],
-      },
-    ],
-  }
-
-
-    // =====================
-    // FILTROS DA SALA
-    // =====================
-    const roomFilters: any = {};
-
-    if (tipo && tipo !== "all") {
-      roomFilters.tipo = tipo;
-    }
-
-    if (bloco) {
-      roomFilters.blocoId = bloco;
-    }
-
-  const where: any = {
-      ...filters,
-
-      ...(Object.keys(roomFilters).length && {
-        room: roomFilters,
-      }),
-
-      ...(number && {
-        OR: [
+      where = {
+        AND: [
+          // Filtro de Data e Recorrência
           {
-            scheduledFor: {
-              is: {
-                nome: {
-                  contains: number,
-                  mode: "insensitive",
-                },
+            OR: [
+              {
+                isRecurring: false,
+                start: { gte: startOfDay, lte: endOfDay },
               },
-            },
+              {
+                isRecurring: true,
+                weekday: base.weekday,
+                start: { lte: endOfDay },
+                OR: [
+                  { maxScheduleTime: null },
+                  { maxScheduleTime: { gte: startOfDay } },
+                ],
+              },
+            ],
           },
+          // Filtros de Sala
           {
             room: {
-              ID_Ambiente: {
-                contains: number,
-                mode: "insensitive",
-              },
+              ...(tipo && tipo !== "all" && { tipo }),
+              ...(bloco && { blocoId: bloco }),
             },
           },
-          {
-            createdBy: {
-              nome: {
-                contains: number,
-                mode: "insensitive",
-              },
-            },
-          },
-
         ],
-      }),
-    };
+      };
+    }
 
-    // =====================
-    // TOTAL
-    // =====================
-    const total = await prisma.roomPeriod.count({ where });
-
-    // =====================
-    // QUERY PRINCIPAL
-    // =====================
-    const agendas = await prisma.roomPeriod.findMany({
-      where,
-      orderBy: { start: "asc" },
-      skip,
-      take: pageSize,
-      include: {
-        room: {
-          select: {
-            id: true,
-            ID_Ambiente: true,
-            tipo: true,
-            bloco: {
-              select: {
-                id: true,
-                nome: true,
-              },
+    // QUERY ÚNICA COM TRANSACTION
+    const [total, agendas] = await prisma.$transaction([
+      prisma.roomPeriod.count({ where }),
+      prisma.roomPeriod.findMany({
+        where,
+        orderBy: { start: "desc" }, // Mudado para 'desc' para ver as mais recentes primeiro na busca
+        skip,
+        take: pageSize,
+        include: {
+          room: {
+            select: {
+              id: true,
+              ID_Ambiente: true,
+              tipo: true,
+              bloco: { select: { id: true, nome: true } },
             },
           },
+          createdBy: { select: { id: true, login: true, nome: true } },
+          scheduledFor: { select: { id: true, login: true, nome: true } },
         },
-        createdBy: {
-          select: {
-            id: true,
-            login: true,
-            nome: true,
-          },
-        },
-        scheduledFor: {
-          select: {
-            id: true,
-            login: true,
-            nome: true,
-          },
-        },
-      },
-    });
+      }),
+    ]);
 
     return res.json({
       data: agendas,
@@ -184,12 +206,9 @@ export async function listScheduling(req: Request, res: Response) {
     });
   } catch (error) {
     console.error("Erro ao listar agendamentos:", error);
-    return res.status(500).json({
-      error: "Erro interno do servidor",
-    });
+    return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
-
 // Cancelar agendamento
 export async function deleteScheduling(req: Request, res: Response) {
   const id = Number(req.params.id);
