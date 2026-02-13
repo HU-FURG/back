@@ -68,7 +68,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   const log = await getSystemLog('last_clear_update');
   const lastRun = log?.updatedAt ?? new Date(0);
   const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
-  if (diffHours >= 24) {
+  if (diffHours >= 1) {
     console.log('⚙️ Rodando rotina de limpeza atrasada no startup...');
     await clearPeriodsandUpdate();
   } else {
