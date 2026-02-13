@@ -1,6 +1,7 @@
 import { Request, Response } from "express"
 import fs from "fs"
 import path from "path"
+import { z } from "zod"
 import { prisma } from "../prisma/client"
 
 // ========================
@@ -78,7 +79,6 @@ export async function getMapSvg(req: Request, res: Response) {
   }
 }
 
-
 export async function createMap(req: Request, res: Response) {
   let uploadedFilePath: string | null = null
 
@@ -139,11 +139,11 @@ export async function addRoomToMap(req: Request, res: Response) {
     const map = await prisma.map.findUnique({
       where: { id: Number(mapId) }
     })
-
+    // verificar mapa
     if (!map) {
       return res.status(404).json({ error: "Mapa não encontrado" })
     }
-
+    // verificar sala
     const room = await prisma.room.findUnique({
       where: { id: Number(roomId) }
     })
@@ -151,6 +151,33 @@ export async function addRoomToMap(req: Request, res: Response) {
     if (!room) {
       return res.status(404).json({ error: "Sala não encontrada" })
     }
+    //verificar se sala já vinculada a algum mapa
+    const existing = await prisma.mapRoom.findFirst({
+      where: {
+        roomId: Number(roomId)
+      }
+    })
+
+    if (existing) {
+      return res.status(400).json({
+        error: "Essa sala já está vinculada a um mapa!"
+      })
+    }
+
+    //verificar se  elementeo svg já vinculado a alguma sala nesse mapa
+    const existingElement = await prisma.mapRoom.findFirst({
+      where: {
+        mapId: Number(mapId),
+        svgElementId
+      }
+    })
+
+    if (existingElement) {
+      return res.status(400).json({
+        error: "Essa sala no mapa já está vinculada a uma sala nesse mapa!"
+      })
+    }
+
 
     const relation = await prisma.mapRoom.create({
       data: {
@@ -170,5 +197,169 @@ export async function addRoomToMap(req: Request, res: Response) {
 
     console.error(error)
     return res.status(500).json({ error: "Erro ao vincular sala ao mapa" })
+  }
+}
+
+export async function confirmRoom(req: Request, res: Response ) {
+    try {
+      const schema = z.object({
+        search: z.string().min(1),
+      })
+  
+      const { search } = schema.parse(req.query)
+  
+      // 1. Busca de Salas
+      const rooms = await prisma.room.findMany({
+        where: {
+          active: true,
+          ID_Ambiente: { contains: search, mode: "insensitive" }
+        },
+        select: {
+          id: true,
+          ID_Ambiente: true,
+          bloco: { select: { nome: true } }
+        },
+        take: 5 // Limite para não sobrecarregar
+      })
+
+      const response = rooms.map(room => ({
+        id: room.id,
+        title: room.ID_Ambiente,
+        subtitle: room.bloco?.nome ?? "Sem Bloco",
+        type: "room"
+      }))
+
+      return res.json(response)
+    } catch (error) {
+      console.error(error)
+      return res.status(500).json({ error: "Erro ao buscar salas" })
+    }
+}
+
+// Controle do registro
+
+export async function getRoomByElement(req: Request, res: Response) {
+  const { mapId, svgElementId } = req.params
+
+  try {
+    const relation = await prisma.mapRoom.findFirst({
+      where: {
+        mapId: Number(mapId),
+        svgElementId
+      },
+      include: {
+        room: {
+          select: {
+            id: true,
+            ID_Ambiente: true,
+            bloco: { select: { nome: true } }
+          }
+        }
+      }
+    })
+
+    if (!relation) {
+      return res.status(404).json({ message: "Elemento livre" })
+    }
+
+    return res.json({
+      id: relation.id,
+      svgElementId: relation.svgElementId,
+      room: relation.room
+    })
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ error: "Erro ao buscar vínculo" })
+  }
+}
+
+
+export async function deleteRoomFromMap(req: Request, res: Response) {
+  const { mapId, mapRoomId } = req.params
+
+  try {
+    const relation = await prisma.mapRoom.findFirst({
+      where: {
+        id: Number(mapRoomId),
+        mapId: Number(mapId)
+      }
+    })
+
+    if (!relation) {
+      return res.status(404).json({ error: "Vínculo não encontrado" })
+    }
+
+    await prisma.mapRoom.delete({
+      where: { id: Number(mapRoomId) }
+    })
+
+    return res.json({ message: "Sala desvinculada com sucesso" })
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ error: "Erro ao desvincular sala" })
+  }
+}
+
+// info por mapa
+
+export async function getMapStatus(req: Request, res: Response) {
+  const { mapId } = req.params
+
+  try {
+    const now = new Date()
+
+    const mapRooms = await prisma.mapRoom.findMany({
+      where: {
+        mapId: Number(mapId)
+      },
+      include: {
+        room: {
+          include: {
+            bloco: true,
+            periods: {
+              where: {
+                approved: true,
+                start: { lte: now },
+                end: { gte: now }
+              },
+              include: {
+                scheduledFor: {
+                  select: { id: true, nome: true, login: true }
+                },
+                createdBy: {
+                  select: { id: true, nome: true, login: true }
+                }
+              }
+            }
+          }
+        }
+      }
+    })
+
+    const response = mapRooms.map((mr) => {
+      const activePeriod = mr.room.periods[0] || null
+
+      return {
+        svgElementId: mr.svgElementId,
+        roomId: mr.room.id,
+        roomName: mr.room.ID_Ambiente,
+        bloco: mr.room.bloco.nome,
+        occupied: !!activePeriod,
+        currentPeriod: activePeriod
+          ? {
+              start: activePeriod.start,
+              end: activePeriod.end,
+              scheduledFor: activePeriod.scheduledFor,
+              createdBy: activePeriod.createdBy
+            }
+          : null
+      }
+    })
+
+    return res.json(response)
+
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ error: "Erro ao buscar status do mapa" })
   }
 }

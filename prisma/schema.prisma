@@ -330,11 +330,11 @@ model Map {
 model MapRoom {
   id         Int @id @default(autoincrement())
   mapId      Int
-  roomId     Int
+  roomId     Int @unique
   svgElementId String
 
   map  Map  @relation(fields: [mapId], references: [id])
   room Room @relation(fields: [roomId], references: [id])
 
-  @@unique([mapId, roomId])
+  @@unique([mapId, svgElementId])
 }
