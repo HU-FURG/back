@@ -420,16 +420,16 @@ export async function deleteRooms(req: Request, res: Response) {
 
 // ✅ Obter agenda de uma sala
 export async function getRoomSchedule(req: Request, res: Response) {
-  const userId = (req as any).user?.userId
-  const { roomId } = req.params
+  const userId = (req as any).user?.userId;
+  const { roomId } = req.params;
 
   if (!userId) {
-    return res.status(401).json({ error: "Usuário não autenticado" })
+    return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  const roomIdNumber = Number(roomId)
+  const roomIdNumber = Number(roomId);
   if (Number.isNaN(roomIdNumber)) {
-    return res.status(400).json({ message: "ID da sala inválido." })
+    return res.status(400).json({ message: "ID da sala inválido." });
   }
 
   try {
@@ -442,45 +442,28 @@ export async function getRoomSchedule(req: Request, res: Response) {
             ID_Ambiente: true,
             tipo: true,
             bloco: {
-              select: {
-                id: true,
-                nome: true,
-              },
+              select: { id: true, nome: true },
             },
           },
         },
         scheduledFor: {
-          select: {
-            id: true,
-            login: true,
-            nome: true,
-          },
+          select: { id: true, login: true, nome: true },
         },
         createdBy: {
-          select: {
-            id: true,
-            login: true,
-            nome: true,
-          },
+          select: { id: true, login: true, nome: true },
         },
       },
       orderBy: { start: "asc" },
-    })
+    });
 
-    const formattedSchedule = reservations.map((r) => {
-      const startDT = DateTime
-        .fromJSDate(r.start)
-        .setZone("America/Sao_Paulo")
-
-      const endDT = DateTime
-        .fromJSDate(r.end)
-        .setZone("America/Sao_Paulo")
+    const formatted = reservations.map((r) => {
+      const startDT = DateTime.fromJSDate(r.start).setZone("America/Sao_Paulo");
+      const endDT = DateTime.fromJSDate(r.end).setZone("America/Sao_Paulo");
 
       return {
         id: r.id,
 
-        // opcional (recorrente)
-        dayOfWeek: r.isRecurring ? startDT.weekday : undefined,
+        dayOfWeek: r.isRecurring ? r.weekday : undefined,
 
         startTime: startDT.toFormat("HH:mm"),
         endTime: endDT.toFormat("HH:mm"),
@@ -488,42 +471,30 @@ export async function getRoomSchedule(req: Request, res: Response) {
         start: startDT.toISO(),
         end: endDT.toISO(),
 
+        startSchedule: r.startSchedule,
+        endSchedule: r.endSchedule,
+        countRecurrence: r.countRecurrence,
+        atualRecurrenceCount: r.atualRecurrenceCount,
+
         isRecurring: r.isRecurring,
         approved: r.approved,
-        maxScheduleTime: r.maxScheduleTime,
+        typeSchedule: r.typeSchedule,
 
-        room: {
-          id: r.room.id,
-          ID_Ambiente: r.room.ID_Ambiente,
-          tipo: r.room.tipo,
-          bloco: {
-            id: r.room.bloco.id,
-            nome: r.room.bloco.nome,
-          },
-        },
+        room: r.room,
+        createdBy: r.createdBy,
+        scheduledFor: r.scheduledFor ?? null,
+      };
+    });
 
-        createdBy: {
-          id: r.createdBy.id,
-          login: r.createdBy.login,
-          nome: r.createdBy.nome,
-        },
-
-        scheduledFor: r.scheduledFor ? {
-          id: r.scheduledFor.id,
-          login: r.scheduledFor.login,
-          nome: r.scheduledFor.nome,
-        } : null,
-      }
-    })
-
-    return res.status(200).json(formattedSchedule)
+    return res.status(200).json(formatted);
   } catch (error) {
-    console.error(`Erro ao buscar agenda da sala ${roomId}:`, error)
+    console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
     return res.status(500).json({
       error: "Erro interno do servidor ao buscar a agenda.",
-    })
+    });
   }
 }
+
 
 
 // ✅ Obter agenda de um bloco em um dia específico
@@ -575,43 +546,41 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     const base = dia;
 
     const reservas = await prisma.roomPeriod.findMany({
-      where: {
-        roomId: { in: roomIds },
+  where: {
+    roomId: { in: roomIds },
 
-        OR: [
-          // 🔹 NÃO recorrente → data exata
-          {
-            isRecurring: false,
-            start: {
-              gte: startOfDay,
-              lte: endOfDay,
-            },
-          },
-
-          // 🔹 Recorrente → weekday + validade
-          {
-            isRecurring: true,
-            weekday: base.weekday,
-            start: { lte: endOfDay },
-            OR: [
-              { maxScheduleTime: null },
-              { maxScheduleTime: { gte: startOfDay } },
-            ],
-          },
-        ],
-      },
-
-      include: {
-        scheduledFor: {
-          select: { id: true, login: true, nome: true },
-        },
-        createdBy: {
-          select: { login: true },
+    OR: [
+      // 🔹 NÃO recorrente → data exata
+      {
+        isRecurring: false,
+        start: {
+          gte: startOfDay,
+          lte: endOfDay,
         },
       },
 
-      orderBy: { start: "asc" },
-    });
+      // 🔹 Recorrente → weekday + intervalo válido
+      {
+        isRecurring: true,
+        weekday: dia.weekday,
+        startSchedule: { lte: endOfDay },
+        endSchedule: { gte: startOfDay },
+      },
+    ],
+  },
+
+  include: {
+    scheduledFor: {
+      select: { id: true, login: true, nome: true },
+    },
+    createdBy: {
+      select: { login: true },
+    },
+  },
+
+  orderBy: { start: "asc" },
+});
+
 
     // =========================
     // FILTRO LÓGICO + PROJEÇÃO
@@ -672,7 +641,6 @@ export async function getBlockDayGrade(req: Request, res: Response) {
 
         isRecurring: resv.isRecurring,
         approved: resv.approved,
-        maxScheduleTime: resv.maxScheduleTime,
 
         scheduledFor:
           resv.scheduledFor?.nome ??

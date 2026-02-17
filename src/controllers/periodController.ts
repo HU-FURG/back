@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { DateTime, Interval } from "luxon";
 import { validateHorarios, verificarConflitoUniversal } from '../auxiliar/validateHorarios';
 import { ReliabilityAgent, ScoreFunnel, SpecialtyAgent, UsageAgent } from '../agentes/funil';
+import { availabilityStatus, typeSchedule } from '@prisma/client';
 
 const TZ = "America/Sao_Paulo";
 
@@ -26,22 +27,10 @@ const BodySchema = z.object({
   tipo: z.string().optional(),
 })
 
-export const AgendamentoSchema = z.object({
-  salaId: z.number(),
-  scheduledForId: z.number().optional(), // 🔥 vem do front
-  horarios: z.array(HorarioSchema),
-  recorrente: z.boolean(),
-  maxTimeRecorrente: z.string(),
-});
 
 
 export const buscarSalasDisponiveis = async (req: Request, res: Response) => {
-  const agente = 'comAgente';
-  if (agente === 'comAgente') {
-    return buscaComAgente(req, res);
-  } else {
-    return buscaSemAgente(req, res);
-  }
+  buscaSemAgente(req, res);
 };
 
 const buscaSemAgente = async (req: Request, res: Response) => {
@@ -114,9 +103,30 @@ const buscaSemAgente = async (req: Request, res: Response) => {
     const whereCondition: any = { active: true };
 
     // 🔒 FUTURO: limitar salas pela especialidade do usuário
-    // if (usuarioAlvo.especialidadeId) {
-    //   whereCondition.especialidadeId = usuarioAlvo.especialidadeId;
-    // }
+    if (usuarioAlvo.especialidadeId) {
+      whereCondition.AND = [
+        {
+          OR: [
+            { tipo: { not: "diferenciada" } },
+            {
+              AND: [
+                { tipo: "diferenciada" },
+                {
+                  especialidade: {
+                    especialidadesAceitas: {
+                      some: {
+                        id: usuarioAlvo.especialidadeId
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+
 
     const isFilteredSearch = !!numeroSala || !!bloco || (tipo && tipo !== "all") || !!especialidadeRoom;
 
@@ -181,7 +191,7 @@ const buscaSemAgente = async (req: Request, res: Response) => {
             dbPeriod.start,
             dbPeriod.end,
             dbPeriod.isRecurring,
-            dbPeriod.maxScheduleTime
+            dbPeriod.endSchedule
           )
         );
       });
@@ -397,6 +407,16 @@ const buscaComAgente = async (req: Request, res: Response) => {
 // ----------------------
 // AGENDAR SALA
 // ----------------------
+export const AgendamentoSchema = z.object({
+  salaId: z.number(),
+  scheduledForId: z.number().optional(),
+  horarios: z.array(HorarioSchema),
+  recorrente: z.boolean(),
+  maxTimeRecorrente: z.string(),
+  tipo: z.enum(["consulta", "aula"]).default("consulta"),
+  avaliacao: z.enum(["ok", "bom", "excelente"]).default("ok"),
+});
+
 export const agendarSala = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;
@@ -409,6 +429,9 @@ export const agendarSala = async (req: Request, res: Response) => {
       horarios,
       recorrente,
       maxTimeRecorrente,
+      tipo,
+      avaliacao,
+
     } = body;
 
     // =========================
@@ -484,7 +507,7 @@ export const agendarSala = async (req: Request, res: Response) => {
           dbPeriod.start,
           dbPeriod.end,
           dbPeriod.isRecurring,
-          dbPeriod.maxScheduleTime
+          dbPeriod.endSchedule
         )
       );
 
@@ -512,41 +535,70 @@ export const agendarSala = async (req: Request, res: Response) => {
     // =========================
     const registros = horarios.map(({ data, horaInicio, horaFim }) => {
 
-      const inicioLocal = DateTime.fromISO(`${data}T${horaInicio}`, {
-        zone: TZ,
-      })
+        const inicioLocal = DateTime.fromISO(`${data}T${horaInicio}`, {
+          zone: TZ,
+        });
 
-      const inicioUTC = inicioLocal.toUTC();
+        const inicioUTC = inicioLocal.toUTC();
 
-      const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, {
-        zone: TZ,
-      }).toUTC();
+        const fimUTC = DateTime.fromISO(`${data}T${horaFim}`, {
+          zone: TZ,
+        }).toUTC();
 
-      const weekday = inicioLocal.weekday
+        const weekday = inicioLocal.weekday;
 
-      let maxUTC: Date | null = null;
+        const startSchedule = inicioUTC.toJSDate();
 
-      if (recorrente && maxTimeRecorrente) {
-        maxUTC = DateTime
-          .fromISO(maxTimeRecorrente, { zone: TZ })
-          .endOf("day")
-          .toUTC()
-          .toJSDate();
-      }
+        let endSchedule = fimUTC.toJSDate();
+        let countRecurrence: number | null = null;
 
+        if (recorrente) {
 
-      return {
-        roomId: salaId,
-        createdById: usuarioLogado.id,
-        scheduledForId: finalScheduledForId,
-        start: inicioUTC.toJSDate(),
-        end: fimUTC.toJSDate(),
-        weekday,
-        isRecurring: recorrente,
-        maxScheduleTime: maxUTC,
-        approved,
-      };
-    });
+          let limiteLocal: DateTime;
+
+          if (maxTimeRecorrente) {
+            limiteLocal = DateTime.fromISO(maxTimeRecorrente, {
+              zone: TZ,
+            }).endOf("day");
+          } else {
+            // 🔥 se não vier data → padrão 6 semanas
+            limiteLocal = inicioLocal.plus({ weeks: 5 }).endOf("day");
+          }
+
+          const diffDays = limiteLocal.diff(inicioLocal, "days").days;
+
+          const weeks = Math.floor(diffDays / 7) + 1;
+
+          countRecurrence = weeks;
+
+          endSchedule = inicioLocal
+            .plus({ weeks: weeks - 1 })
+            .toUTC()
+            .toJSDate();
+        }
+
+        return {
+          roomId: salaId,
+          createdById: usuarioLogado.id,
+          scheduledForId: finalScheduledForId,
+
+          start: inicioUTC.toJSDate(),
+          end: fimUTC.toJSDate(),
+          weekday,
+
+          isRecurring: recorrente,
+
+          startSchedule,
+          endSchedule,
+          countRecurrence,
+          atualRecurrenceCount: 0,
+
+          typeSchedule: tipo as typeSchedule,
+          availabilityStatus: avaliacao as availabilityStatus,
+          approved,
+        };
+      });
+
 
     await prisma.roomPeriod.createMany({ data: registros });
 

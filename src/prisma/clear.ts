@@ -8,27 +8,74 @@ function durationInMinutes(start: Date, end: Date): number {
 }
 
 export const clearPeriodsandUpdate = async () => {
-  // 🔐 Sempre trabalhar em UTC no backend
-  const agora = DateTime.now().toUTC().toJSDate()
+  const agora = DateTime.now().toUTC()
+  const hojeUTC = agora.startOf("day")
+  const amanhaUTC = hojeUTC.plus({ days: 1 })
   const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000
 
   try {
+
+    // =====================================================
+    // 1️⃣ CRIAR roomTimeUsedDaily PARA TODAS AS SALAS
+    // =====================================================
+
+    const rooms = await prisma.room.findMany({
+      select: {
+        id: true,
+        ID_Ambiente: true,
+        bloco: { select: { nome: true } }
+      }
+    })
+
+    const roomDailyMap = new Map<string, number>()
+
+    for (const room of rooms) {
+
+      const reservasDoDia = await prisma.roomPeriod.findMany({
+        where: {
+          roomId: room.id,
+          start: {
+            gte: hojeUTC.toJSDate(),
+            lt: amanhaUTC.toJSDate()
+          }
+        }
+      })
+
+      const totalUsedMinutes = reservasDoDia.reduce((acc, r) => {
+        return acc + durationInMinutes(r.start, r.end)
+      }, 0)
+
+      const daily = await prisma.roomTimeUsedDaily.create({
+        data: {
+          date: hojeUTC.toJSDate(),
+          weekday: hojeUTC.weekday,
+          roomIdAmbiente: room.ID_Ambiente,
+          roomBloco: room.bloco.nome,
+          totalUsedMinutes
+        }
+      })
+
+      roomDailyMap.set(room.ID_Ambiente, daily.id)
+    }
+
+    // =====================================================
+    // 2️⃣ PROCESSAR PERÍODOS VENCIDOS
+    // =====================================================
+
     const recurringToUpdate = await prisma.$transaction(async (tx) => {
-      // =========================
-      // 🔎 Buscar períodos vencidos
-      // =========================
+
       const periods = await tx.roomPeriod.findMany({
         where: {
-          end: { lt: agora },
+          end: { lt: agora.toJSDate() }
         },
         include: {
           room: {
             select: {
               ID_Ambiente: true,
-              bloco: { select: { nome: true } },
-            },
-          },
-        },
+              bloco: { select: { nome: true } }
+            }
+          }
+        }
       })
 
       if (!periods.length) {
@@ -36,52 +83,42 @@ export const clearPeriodsandUpdate = async () => {
         return []
       }
 
-      // =========================
-      // 👥 Buscar usuários (anti N+1)
-      // =========================
       const userIds = [
         ...new Set(
           periods
-            .map((p) => p.scheduledForId)
+            .map(p => p.scheduledForId)
             .filter((id): id is number => Boolean(id))
-        ),
+        )
       ]
 
       const users = await tx.user.findMany({
         where: { id: { in: userIds } },
-        select: { id: true, nome: true },
+        select: { id: true, nome: true }
       })
 
-      const userMap = new Map(users.map((u) => [u.id, u.nome]))
+      const userMap = new Map(users.map(u => [u.id, u.nome]))
 
-      // =========================
-      // 📦 Preparar operações
-      // =========================
       const historyData: Prisma.PeriodHistoryCreateManyInput[] = []
       const templateData: Prisma.RoomScheduleTemplateCreateManyInput[] = []
+      const reportDailyData: Prisma.PeriodReportDailyCreateManyInput[] = []
       const toDeleteIds: number[] = []
       const recurringValid: typeof periods = []
 
       for (const period of periods) {
+
         const duration = durationInMinutes(period.start, period.end)
-
-        // 🔁 Próximo ciclo REAL (baseado no período atual)
-        const nextStart = new Date(period.start.getTime() + sevenDaysInMs)
-        const nextEnd = new Date(period.end.getTime() + sevenDaysInMs)
-
-        const exceededLimit =
-          period.isRecurring &&
-          period.maxScheduleTime &&
-          nextEnd > period.maxScheduleTime
 
         const scheduledForNome =
           period.scheduledForId
             ? userMap.get(period.scheduledForId) ?? "Desconhecido"
             : "Desconhecido"
 
-        // =========================
-        // 📜 HISTÓRICO (sempre)
-        // =========================
+        const roomDailyId = roomDailyMap.get(period.room.ID_Ambiente)
+
+        // --------------------------
+        // HISTÓRICO
+        // --------------------------
+
         historyData.push({
           roomIdAmbiente: period.room.ID_Ambiente,
           roomBloco: period.room.bloco.nome,
@@ -93,11 +130,11 @@ export const clearPeriodsandUpdate = async () => {
           createdByLogin: null,
           createdByNome: null,
           scheduledForLogin: null,
-          scheduledForNome: scheduledForNome,
+          scheduledForNome,
 
           start: period.start,
           end: period.end,
-          weekday: ((period.start.getUTCDay() + 6) % 7) + 1, // ISO 1–7
+          weekday: ((period.start.getUTCDay() + 6) % 7) + 1,
 
           used: false,
           startService: null,
@@ -105,13 +142,40 @@ export const clearPeriodsandUpdate = async () => {
 
           durationMinutes: duration,
           actualDurationMinutes: null,
-          archivedAt: agora,
+          archivedAt: agora.toJSDate()
         })
 
-        // =========================
-        // 📦 TEMPLATE + DELETE
-        // =========================
+        // --------------------------
+        // RELATÓRIO DIÁRIO
+        // --------------------------
+
+        if (roomDailyId) {
+          reportDailyData.push({
+            idPeriod: period.id,
+            createdById: period.createdById,
+            scheduledForId: period.scheduledForId!,
+            start: period.start,
+            end: period.end,
+            totalUsedMinutes: duration,
+            availabilityStatus: period.availabilityStatus,
+            typeSchedule: period.typeSchedule,
+            used: false,
+            roomDailyId
+          })
+        }
+
+        // --------------------------
+        // CONTROLE DE RECORRÊNCIA
+        // --------------------------
+
+        const exceededLimit =
+          period.isRecurring &&
+          period.countRecurrence !== null &&
+          period.atualRecurrenceCount !== null &&
+          period.atualRecurrenceCount + 1 >= period.countRecurrence
+
         if (!period.isRecurring || exceededLimit) {
+
           templateData.push({
             userId: period.scheduledForId,
             nome: scheduledForNome,
@@ -122,65 +186,57 @@ export const clearPeriodsandUpdate = async () => {
             originalEnd: period.end,
             reason: period.isRecurring
               ? "Limite de recorrência atingido"
-              : "Reserva vencida",
+              : "Reserva vencida"
           })
 
           toDeleteIds.push(period.id)
+
         } else {
-          // 🔁 Recorrente ainda válida → será atualizada
           recurringValid.push(period)
         }
       }
 
-      // =========================
-      // 🧾 Persistência (transação)
-      // =========================
-      if (historyData.length) {
+      if (historyData.length)
         await tx.periodHistory.createMany({ data: historyData })
-      }
 
-      if (templateData.length) {
+      if (reportDailyData.length)
+        await tx.periodReportDaily.createMany({ data: reportDailyData })
+
+      if (templateData.length)
         await tx.roomScheduleTemplate.createMany({ data: templateData })
-      }
 
-      if (toDeleteIds.length) {
-        await tx.roomPeriod.deleteMany({
-          where: { id: { in: toDeleteIds } },
-        })
-      }
+      if (toDeleteIds.length)
+        await tx.roomPeriod.deleteMany({ where: { id: { in: toDeleteIds } } })
 
       return recurringValid
     })
 
-    // =========================
-    // 🔁 Atualizar recorrências válidas
-    // =========================
+    // =====================================================
+    // 3️⃣ ATUALIZAR RECORRÊNCIAS VÁLIDAS
+    // =====================================================
+
     if (recurringToUpdate.length) {
-      const chunkSize = 50
 
-      for (let i = 0; i < recurringToUpdate.length; i += chunkSize) {
-        const chunk = recurringToUpdate.slice(i, i + chunkSize)
-
-        await Promise.all(
-          chunk.map((period) =>
-            prisma.roomPeriod.update({
-              where: { id: period.id },
-              data: {
-                start: new Date(period.start.getTime() + sevenDaysInMs),
-                end: new Date(period.end.getTime() + sevenDaysInMs),
-                updatedAt: agora,
-              },
-            })
-          )
+      await Promise.all(
+        recurringToUpdate.map(period =>
+          prisma.roomPeriod.update({
+            where: { id: period.id },
+            data: {
+              start: new Date(period.start.getTime() + sevenDaysInMs),
+              end: new Date(period.end.getTime() + sevenDaysInMs),
+              atualRecurrenceCount: { increment: 1 }
+            }
+          })
         )
-      }
+      )
     }
 
-    await updateSystemLog("last_clear_update", agora.toISOString())
+    await updateSystemLog("last_clear_update", agora.toISO())
 
     console.log(
       `[✅] Clear concluído. ${recurringToUpdate.length} recorrências atualizadas.`
     )
+
   } catch (error) {
     console.error("[❌] Erro crítico no clear:", error)
   }

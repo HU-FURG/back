@@ -103,7 +103,6 @@ export async function listScheduling(req: Request, res: Response) {
     const skip = (currentPage - 1) * pageSize;
 
     let where: any = {};
-
     // ==========================================================
     // CASO A: BUSCA ESPECÍFICA (Ignora data/bloco/tipo)
     // ==========================================================
@@ -146,25 +145,24 @@ export async function listScheduling(req: Request, res: Response) {
 
       where = {
         AND: [
-          // Filtro de Data e Recorrência
           {
             OR: [
+              // 🔹 Não recorrente
               {
                 isRecurring: false,
                 start: { gte: startOfDay, lte: endOfDay },
               },
+
+              // 🔹 Recorrente
               {
                 isRecurring: true,
                 weekday: base.weekday,
-                start: { lte: endOfDay },
-                OR: [
-                  { maxScheduleTime: null },
-                  { maxScheduleTime: { gte: startOfDay } },
-                ],
+                startSchedule: { lte: endOfDay },
+                endSchedule: { gte: startOfDay },
               },
             ],
           },
-          // Filtros de Sala
+
           {
             room: {
               ...(tipo && tipo !== "all" && { tipo }),
@@ -172,7 +170,7 @@ export async function listScheduling(req: Request, res: Response) {
             },
           },
         ],
-      };
+      }
     }
 
     // QUERY ÚNICA COM TRANSACTION
@@ -180,10 +178,21 @@ export async function listScheduling(req: Request, res: Response) {
       prisma.roomPeriod.count({ where }),
       prisma.roomPeriod.findMany({
         where,
-        orderBy: { start: "desc" }, // Mudado para 'desc' para ver as mais recentes primeiro na busca
+        orderBy: { start: "desc" },
         skip,
         take: pageSize,
-        include: {
+        select: {
+          id: true,
+          start: true,
+          end: true,
+          startSchedule: true,
+          endSchedule: true,
+          countRecurrence: true,
+          atualRecurrenceCount: true,
+          isRecurring: true,
+          approved: true,
+          typeSchedule: true,
+
           room: {
             select: {
               id: true,
@@ -192,10 +201,16 @@ export async function listScheduling(req: Request, res: Response) {
               bloco: { select: { id: true, nome: true } },
             },
           },
-          createdBy: { select: { id: true, login: true, nome: true } },
-          scheduledFor: { select: { id: true, login: true, nome: true } },
+
+          createdBy: {
+            select: { id: true, login: true, nome: true }
+          },
+
+          scheduledFor: {
+            select: { id: true, login: true, nome: true }
+          },
         },
-      }),
+      })
     ]);
 
     return res.json({
@@ -209,6 +224,7 @@ export async function listScheduling(req: Request, res: Response) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
+
 // Cancelar agendamento
 export async function deleteScheduling(req: Request, res: Response) {
   const id = Number(req.params.id);

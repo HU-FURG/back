@@ -119,7 +119,7 @@ export function verificarConflitoUniversal(
   dbStart: Date,            
   dbEnd: Date | null,       
   dbIsRecorrente: boolean,
-  dbMaxRecurrenceEnd: Date | null // SE FOR NULL = INFINITO
+  dbEndSchedule: Date | null // SE FOR NULL = INFINITO
 ): boolean {
 
   // =======================================================================
@@ -157,10 +157,10 @@ export function verificarConflitoUniversal(
 
   if (dbIsRecorrente) {
       // CORREÇÃO 2: Se dbMaxRecurrenceEnd for null ou invalido, considera Infinito
-      if (!dbMaxRecurrenceEnd) {
+      if (!dbEndSchedule) {
           dbVigenciaFim = dbInicioDT.plus({ years: 100 }).endOf('day');
       } else {
-          dbVigenciaFim = DateTime.fromJSDate(dbMaxRecurrenceEnd).setZone(TZ).endOf('day');
+          dbVigenciaFim = DateTime.fromJSDate(dbEndSchedule).setZone(TZ).endOf('day');
       }
   } else {
       // Não recorrente: usa o dbEnd ou assume mesmo dia

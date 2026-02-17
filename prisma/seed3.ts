@@ -79,24 +79,40 @@ async function main() {
       let salaFinal = null;
 
       for (const sala of rooms) {
+        
         const conflito = await prisma.roomPeriod.findFirst({
           where: {
             roomId: sala.id,
-            weekday,
-            start: { lt: endUTC },
-            end: { gt: startUTC },
+
             OR: [
-              { isRecurring: false },
+              // 🔹 não recorrente
+              {
+                isRecurring: false,
+                start: { lt: endUTC },
+                end: { gt: startUTC },
+              },
+
+              // 🔹 recorrente
               {
                 isRecurring: true,
+                weekday,
+                start: { lt: endUTC },
+                end: { gt: startUTC },
+                startSchedule: { lte: startUTC },
+                endSchedule: { gte: startUTC },
                 OR: [
-                  { maxScheduleTime: null },
-                  { maxScheduleTime: { gte: startUTC } },
+                  { countRecurrence: null },
+                  {
+                    atualRecurrenceCount: {
+                      lt: prisma.roomPeriod.fields.countRecurrence,
+                    },
+                  },
                 ],
               },
             ],
           },
         });
+
 
         if (!conflito) {
           salaFinal = sala;
@@ -106,25 +122,42 @@ async function main() {
 
       // Se nenhuma sala estiver livre, pula
       if (!salaFinal) continue;
+        const recurrenceCount = isRecurring
+            ? 3 + Math.floor(Math.random() * 4) // 3–6
+            : null;
 
-      await prisma.roomPeriod.create({
-        data: {
-          roomId: salaFinal.id,
-          createdById: admin.id,
-          scheduledForId: user.id,
+        const endSchedule = isRecurring
+          ? DateTime.fromJSDate(startUTC)
+              .plus({ weeks: recurrenceCount! - 1 })
+              .toUTC()
+              .toJSDate()
+          : endUTC;
 
-          start: startUTC,
-          end: endUTC,
-          weekday,
 
-          isRecurring,
-          approved: true,
-        },
-      });
+        await prisma.roomPeriod.create({
+          data: {
+            roomId: salaFinal.id,
+            createdById: admin.id,
+            scheduledForId: user.id,
 
-      criados++;
+            start: startUTC,
+            end: endUTC,
+            weekday,
+
+            isRecurring,
+            approved: true,
+
+            startSchedule: startUTC,
+            endSchedule,
+
+            countRecurrence: recurrenceCount,
+            atualRecurrenceCount: 0,
+          },
+        });
+
+        criados++;
+      }
     }
-  }
 
   console.log(`✅ ${criados} agendamentos criados com sucesso!`);
 }
