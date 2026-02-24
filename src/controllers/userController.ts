@@ -53,11 +53,11 @@ export async function login(req: Request, res: Response) {
     console.log("Token JWT gerado:", token.substring(0, 20) + "...");
 
     const isProduction = process.env.NODE_ENV === "production";
-
+    
     res.cookie('token', token, {
       httpOnly: true,
       secure: isProduction,             // só HTTPS em produção
-      sameSite: "none", // em produção = Lax (primeira parte), dev pode ser Lax também
+      sameSite: isProduction ? "none" as const : "lax" as const,
       maxAge: remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
     });
 
@@ -110,10 +110,10 @@ export async function loginAnonimo(req: Request, res: Response) {//verificado
     );
 
     console.log(" Token anônimo gerado:", token.substring(0, 20) + "...");
-
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("token", token, {
       httpOnly: true,
-      sameSite: process.env.NODE_ENV === "none" ,
+      sameSite: isProduction ? "none" as const : "lax" as const,
       secure: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
