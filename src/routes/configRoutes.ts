@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createBloco, createEspecialidadeRoom, createEspecialidadeUser, createUser, deleteUser, editBloco, editUser, getRoomFilters, listBlocos, listRoomEspecialidades, listUsers, listUsersDesactive, listUsersEspecialidades, updateEspecialidadeRoom } from '../controllers/configControllers';
+import { createBloco, createEspecialidadeRoom, createEspecialidadeUser, createUser, deleteBloco, deleteUser, editBloco, editUser, getRoomFilters, listBlocos, listRoomEspecialidades, listUsers, listUsersDesactive, listUsersEspecialidades, updateEspecialidadeRoom } from '../controllers/configControllers';
 import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
@@ -35,5 +35,6 @@ router.delete('/users/:id', authenticateToken, deleteUser);
 router.get('/blocos', authenticateToken, listBlocos);
 router.post('/blocos', authenticateToken, createBloco);
 router.put('/blocos/:id', authenticateToken, editBloco);
+router.delete('/blocos/:id', authenticateToken, deleteBloco);
 
 export default router;

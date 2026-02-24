@@ -55,9 +55,9 @@ app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
 
 app.get('/health', (req, res) => res.sendStatus(200)); // rota de verificação de deploy
 
-// app.get('*', (req, res) => {
-//   res.sendFile(path.join(__dirname, '../public', 'index.html'));
-// });
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public', 'index.html'));
+});
 
 
 const PORT = Number(process.env.PORT) || 3333; 
@@ -68,7 +68,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   const log = await getSystemLog('last_clear_update');
   const lastRun = log?.updatedAt ?? new Date(0);
   const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
-  if (diffHours >= 0) {
+  if (diffHours >= 24) {
     console.log('⚙️ Rodando rotina de limpeza atrasada no startup...');
     await clearPeriodsandUpdate();
   } else {

@@ -199,6 +199,26 @@ export async function createUser(req: Request, res: Response) {
         .json({ error: "Usuário já existe" })
     }
 
+    const exitingSpecialidade = especialidadeId
+      ? await prisma.especialidadeUser.findUnique({
+          where: { id: especialidadeId },
+        })
+      : false
+    
+    if (especialidadeId && !exitingSpecialidade) {
+      return res
+        .status(400)
+        .json({ error: "Especialidade não existe" })
+    }
+
+    let especialidadeIdAdmin: number | undefined = undefined;
+
+    if (cargo === "admin") {
+      especialidadeIdAdmin = await prisma.especialidadeUser.findFirst({
+        where: { nome: "Administrador" },
+      }).then(e => e?.id)
+    }
+
     // 🔎 email duplicado
     if (email) {
       const existingEmail =
@@ -213,8 +233,15 @@ export async function createUser(req: Request, res: Response) {
       }
     }
 
+    let hashedPassword: string;
+
     // 🔐 hash da senha
-    const hashedPassword = await bcrypt.hash(senha, 10)
+    if (cargo === "user") {
+      hashedPassword = await bcrypt.hash("hospital", 10)
+    }
+    else {
+      hashedPassword = await bcrypt.hash(senha, 10)
+    }
 
     // 🧠 hierarquia
     const hierarquia =
@@ -234,7 +261,7 @@ export async function createUser(req: Request, res: Response) {
         active: true,
         especialidadeId:
           hierarquia === Hierarquia.admin
-            ? null
+            ? especialidadeIdAdmin
             : especialidadeId ?? null,
       },
       include: {
@@ -429,7 +456,12 @@ export async function getMyProfile(req: Request, res: Response) {
     const { login } = (req as any).user;
     console.log("Buscando perfil do usuário:", login);
 
-    const user = await prisma.user.findUnique({where:{login}});
+    const user = await prisma.user.findUnique(
+      { where:{login},
+        include: {especialidade: {
+        select: { nome: true },
+      },}
+    });
 
     if (!user) {
       console.warn("Usuário não encontrado:", login);
@@ -440,8 +472,12 @@ export async function getMyProfile(req: Request, res: Response) {
       login: user.login,
       nome: user.nome,
       email: user.email,
-      especialidade: user.especialidadeId,
-      lastLogin_at: user.lastLogin_at
+      telefone: user.telefone,
+      descricao: user.descricao,
+      hierarquia: user.hierarquia,
+      especialidade: {nome: user.especialidade?.nome ?? "—"},
+      lastLogin_at: user.lastLogin_at,
+      active: user.active,
     });
   } catch (err) {
     console.error("Erro ao buscar perfil do usuário:", err);
@@ -452,60 +488,98 @@ export async function getMyProfile(req: Request, res: Response) {
 export async function updateProfile(req: Request, res: Response) {
   try {
     const { login } = (req as any).user;
-    const { nome, email, password, newPassword } = req.body;
+    const {
+      nome,
+      email,
+      telefone,
+      descricao,
+      newPassword,   
+    } = req.body;
 
     console.log("Tentando atualizar perfil de:", login);
 
-    // 1. Buscar o usuário atual para garantir que existe e pegar dados atuais
     const user = await prisma.user.findUnique({
-      where: { login }
+      where: { login },
     });
 
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado." });
     }
 
-    // Objeto que vai guardar apenas o que vamos atualizar
     const dataToUpdate: any = {};
 
-    // --- LÓGICA DO NOME (Opcional) ---
-    if (nome && nome !== user.nome) {
-      dataToUpdate.nome = nome;
-    }
+    /* ===============================
+      NOME
+    ================================ */
+    if( !newPassword ) {
+      if (nome !== undefined && nome !== user.nome) {
+        dataToUpdate.nome = nome; // pode ser ""
+      }
+      console.log("Nome atualizado para:", nome);
+      /* ===============================
+        EMAIL
+      ================================ */
+      if (email !== undefined && email !== user.email) {
+        if (email !== "") {
+          const emailExists = await prisma.user.findFirst({
+            where: {
+              email,
+              NOT: { login },
+            },
+          });
 
-    // --- LÓGICA DO EMAIL ---
-    if (email && email !== user.email) {
-      // Verificar se o email já está em uso por OUTRA pessoa
-      const emailExists = await prisma.user.findUnique({
-        where: { email }
-      });
+          if (emailExists) {
+            return res.status(400).json({
+              error: "Este e-mail já está em uso.",
+            });
+          }
+        }
 
-      if (emailExists) {
-        return res.status(400).json({ error: "Este e-mail já está em uso." });
+        dataToUpdate.email = email; // pode ser ""
+      }
+      /* ===============================
+        TELEFONE
+      =============================== */
+      if (telefone !== undefined && telefone !== user.telefone) {
+        dataToUpdate.telefone = telefone;
       }
 
-      dataToUpdate.email = email;
-    }
-
-    // --- LÓGICA DA SENHA ---
-    // Aqui assumo que o front manda 'newPassword' quando quer trocar.
-    if (newPassword) {
-      // (Opcional) Segurança extra: Verificar se a 'password' atual bate
-      if (!password || !await bcrypt.compare(password, user.senha)) {
-         return res.status(401).json({ error: "Senha atual incorreta." });
+      /* ===============================
+        DESCRIÇÃO
+      =============================== */
+      if (descricao !== undefined && descricao !== user.descricao) {
+        dataToUpdate.descricao = descricao;
       }
+    } else {
+          /* ===============================
+            SENHA
+          =============================== */
+          if (newPassword) {
+            if (newPassword.length < 6) {
+              return res.status(400).json({
+                error: "A nova senha deve ter pelo menos 6 caracteres.",
+              });
+            }
 
-      // Criptografa a nova senha antes de salvar
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      dataToUpdate.password = hashedPassword;
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            dataToUpdate.senha = hashedPassword; // CORRIGIDO AQUI
+          }
     }
 
-    // Se não tiver nada para atualizar, retorna erro ou ok direto
+
+    /* ===============================
+       NADA PARA ATUALIZAR
+    =============================== */
     if (Object.keys(dataToUpdate).length === 0) {
-      return res.status(400).json({ message: "Nenhum dado para atualizar." });
+      return res.status(400).json({
+        message: "Nenhum dado para atualizar.",
+      });
     }
 
-    // 2. Executar a atualização no banco
+    /* ===============================
+       UPDATE
+    =============================== */
     const updatedUser = await prisma.user.update({
       where: { login },
       data: dataToUpdate,
@@ -513,19 +587,15 @@ export async function updateProfile(req: Request, res: Response) {
 
     console.log("Perfil atualizado com sucesso:", login);
 
-    // Retornamos os dados atualizados (sem a senha, claro)
     return res.status(200).json({
-      login: updatedUser.login,
-      nome: updatedUser.nome,
-      email: updatedUser.email,
-      hierarquia: updatedUser.hierarquia,
-      message: "Perfil atualizado com sucesso!"
+      message: "Perfil atualizado com sucesso!",
     });
 
   } catch (err) {
     console.error("Erro ao atualizar perfil:", err);
-    return res.status(500).json({ error: "Erro interno ao atualizar perfil." });
+    return res.status(500).json({
+      error: "Erro interno ao atualizar perfil.",
+    });
   }
 }
-
 // verifica email automatico

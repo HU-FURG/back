@@ -464,4 +464,34 @@ export async function editBloco(req: Request, res: Response) {
   return res.json(bloco);
 }
 
+export async function deleteBloco(req: Request, res: Response) {
+  const blocoId = Number(req.params.id);
+  
+  if (Number.isNaN(blocoId)) {
+    return res.status(400).json({ message: "não possui id" });
+  }
+
+  const temSalasRegistradas = await prisma.blocoRoom.findUnique({
+    where: { id: blocoId },
+    include: {
+      _count: { select: { rooms: true } }
+    }
+  });
+
+  if (!temSalasRegistradas) {
+    return res.status(404).json({ message: "Bloco não encontrado" });
+  }
+
+  if (temSalasRegistradas._count.rooms > 0) {
+    return res.status(400).json({ message: "Não é permitido deletar um bloco com salas registradas" });
+  }
+
+  await prisma.blocoRoom.delete({
+    where: { id: blocoId }
+  });
+
+  return res.json({ message: "Bloco deletado com sucesso" });
+}
+
+
 //------------------------------------------------

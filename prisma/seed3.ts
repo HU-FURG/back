@@ -22,8 +22,6 @@ async function main() {
 
   const rooms = await prisma.room.findMany();
 
-  console.log(`👥 ${users.length} usuários | 🏢 ${rooms.length} salas`);
-
   if (!users.length || !rooms.length) {
     console.log("❌ Seed abortado: usuários ou salas inexistentes.");
     return;
@@ -32,23 +30,34 @@ async function main() {
   await prisma.roomPeriod.deleteMany();
   console.log("🧹 Reservas antigas apagadas.");
 
+  // 🔥 BUSCA TODOS OS PERIODOS UMA VEZ
+  const existingPeriods = await prisma.roomPeriod.findMany();
+
+  // Agrupa por sala
+  const periodsByRoom = new Map<number, any[]>();
+  for (const period of existingPeriods) {
+    if (!periodsByRoom.has(period.roomId)) {
+      periodsByRoom.set(period.roomId, []);
+    }
+    periodsByRoom.get(period.roomId)!.push(period);
+  }
+
   const startOfWeek = DateTime.now()
     .setZone(TZ)
     .startOf("week");
 
+  const novosPeriodos: any[] = [];
   let criados = 0;
 
   for (let dia = 0; dia < 5; dia++) {
     const dayBase = startOfWeek.plus({ days: dia });
 
     for (const user of users) {
-      // =========================
-      // HORÁRIO REALISTA
-      // =========================
+
       const startHour =
         Math.random() < 0.5
-          ? 8 + Math.floor(Math.random() * 3)   // 08–10
-          : 13 + Math.floor(Math.random() * 3); // 13–15
+          ? 8 + Math.floor(Math.random() * 3)
+          : 13 + Math.floor(Math.random() * 3);
 
       const endHour = startHour + 4;
 
@@ -73,91 +82,84 @@ async function main() {
 
       const isRecurring = Math.random() < 0.7;
 
-      // =========================
-      // TENTAR ACHAR SALA LIVRE
-      // =========================
       let salaFinal = null;
 
       for (const sala of rooms) {
-        
-        const conflito = await prisma.roomPeriod.findFirst({
-          where: {
-            roomId: sala.id,
 
-            OR: [
-              // 🔹 não recorrente
-              {
-                isRecurring: false,
-                start: { lt: endUTC },
-                end: { gt: startUTC },
-              },
+        const periodos = periodsByRoom.get(sala.id) ?? [];
 
-              // 🔹 recorrente
-              {
-                isRecurring: true,
-                weekday,
-                start: { lt: endUTC },
-                end: { gt: startUTC },
-                startSchedule: { lte: startUTC },
-                endSchedule: { gte: startUTC },
-                OR: [
-                  { countRecurrence: null },
-                  {
-                    atualRecurrenceCount: {
-                      lt: prisma.roomPeriod.fields.countRecurrence,
-                    },
-                  },
-                ],
-              },
-            ],
-          },
-        });
+        const newStartMin = startLocal.hour * 60;
+        const newEndMin = endLocal.hour * 60;
 
+        let temConflito = false;
 
-        if (!conflito) {
+        for (const periodo of periodos) {
+          if (periodo.weekday !== weekday) continue;
+
+          const dbStart = DateTime.fromJSDate(periodo.start).setZone(TZ);
+          const dbEnd = DateTime.fromJSDate(periodo.end).setZone(TZ);
+
+          const dbStartMin = dbStart.hour * 60;
+          const dbEndMin = dbEnd.hour * 60;
+
+          if (dbStartMin < newEndMin && dbEndMin > newStartMin) {
+            temConflito = true;
+            break;
+          }
+        }
+
+        if (!temConflito) {
           salaFinal = sala;
           break;
         }
       }
 
-      // Se nenhuma sala estiver livre, pula
       if (!salaFinal) continue;
-        const recurrenceCount = isRecurring
-            ? 3 + Math.floor(Math.random() * 4) // 3–6
-            : null;
 
-        const endSchedule = isRecurring
-          ? DateTime.fromJSDate(startUTC)
-              .plus({ weeks: recurrenceCount! - 1 })
-              .toUTC()
-              .toJSDate()
-          : endUTC;
+      const recurrenceCount = isRecurring
+        ? 3 + Math.floor(Math.random() * 4)
+        : null;
 
+      const endSchedule = isRecurring
+        ? DateTime.fromJSDate(startUTC)
+            .plus({ weeks: recurrenceCount! - 1 })
+            .toUTC()
+            .toJSDate()
+        : endUTC;
 
-        await prisma.roomPeriod.create({
-          data: {
-            roomId: salaFinal.id,
-            createdById: admin.id,
-            scheduledForId: user.id,
+      const novoPeriodo = {
+        roomId: salaFinal.id,
+        createdById: admin.id,
+        scheduledForId: user.id,
+        start: startUTC,
+        end: endUTC,
+        weekday,
+        isRecurring,
+        approved: true,
+        startSchedule: startUTC,
+        endSchedule,
+        countRecurrence: recurrenceCount,
+        atualRecurrenceCount: 0,
+      };
 
-            start: startUTC,
-            end: endUTC,
-            weekday,
+      // adiciona no array
+      novosPeriodos.push(novoPeriodo);
 
-            isRecurring,
-            approved: true,
-
-            startSchedule: startUTC,
-            endSchedule,
-
-            countRecurrence: recurrenceCount,
-            atualRecurrenceCount: 0,
-          },
-        });
-
-        criados++;
+      // adiciona também na memória pra evitar conflito futuro
+      if (!periodsByRoom.has(salaFinal.id)) {
+        periodsByRoom.set(salaFinal.id, []);
       }
+
+      periodsByRoom.get(salaFinal.id)!.push(novoPeriodo);
+
+      criados++;
     }
+  }
+
+  // 🔥 INSERE TUDO DE UMA VEZ
+  await prisma.roomPeriod.createMany({
+    data: novosPeriodos,
+  });
 
   console.log(`✅ ${criados} agendamentos criados com sucesso!`);
 }

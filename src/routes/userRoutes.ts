@@ -14,8 +14,8 @@ router.get("/users",authenticateToken, requireRole(["admin"]),  getUsers);
 router.post("/users", authenticateToken, requireRole(["admin"]), createUser);
 // router.delete("/users", authenticateToken, requireRole(["admin"]), removeUser);
 
-router.get('/my-profile', authenticateToken,requireRole(["user"]), getMyProfile);
-router.patch('/my-profile', authenticateToken,requireRole(["user"]), updateProfile);
+router.get('/my-profile', authenticateToken,requireRole(["user", "admin"]), getMyProfile);
+router.patch('/my-profile', authenticateToken,requireRole(["user", "admin"]), updateProfile);
 
 
 

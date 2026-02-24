@@ -158,7 +158,7 @@ export async function addRoomToMap(req: Request, res: Response) {
       }
     })
 
-    if (existing) {
+    if (!!existing) {
       return res.status(400).json({
         error: "Essa sala já está vinculada a um mapa!"
       })
@@ -172,13 +172,11 @@ export async function addRoomToMap(req: Request, res: Response) {
       }
     })
 
-    if (existingElement) {
+    if (!!existingElement) {
       return res.status(400).json({
         error: "Essa sala no mapa já está vinculada a uma sala nesse mapa!"
       })
     }
-
-
     const relation = await prisma.mapRoom.create({
       data: {
         mapId: Number(mapId),
@@ -191,7 +189,7 @@ export async function addRoomToMap(req: Request, res: Response) {
   } catch (error: any) {
     if (error.code === "P2002") {
       return res.status(400).json({
-        error: "Essa sala já está vinculada a esse mapa"
+        error: "Essa sala já está vinculada a esse mapa02"
       })
     }
 
@@ -296,6 +294,7 @@ export async function deleteRoomFromMap(req: Request, res: Response) {
     return res.json({ message: "Sala desvinculada com sucesso" })
   } catch (error) {
     console.error(error)
+    
     return res.status(500).json({ error: "Erro ao desvincular sala" })
   }
 }

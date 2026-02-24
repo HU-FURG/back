@@ -234,6 +234,14 @@ export async function deleteScheduling(req: Request, res: Response) {
     const agenda = await prisma.roomPeriod.findUnique({ where: { id } });
     if (!agenda) return res.status(404).json({ error: "Agendamento não encontrado." });
 
+    const dateNow = DateTime.now().setZone("America/Sao_Paulo");
+    const start = DateTime.fromJSDate(agenda.start).setZone("America/Sao_Paulo");
+    const end = DateTime.fromJSDate(agenda.end).setZone("America/Sao_Paulo");
+
+    if (dateNow > start && dateNow < end) {
+      return res.status(400).json({ error: "Não é possível cancelar um agendamento em andamento." });
+    }
+
     await prisma.roomPeriod.delete({ where: { id } });
     return res.json({ message: "Agendamento cancelado com sucesso." });
   } catch (error) {
