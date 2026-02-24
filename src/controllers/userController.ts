@@ -57,7 +57,7 @@ export async function login(req: Request, res: Response) {
     res.cookie('token', token, {
       httpOnly: true,
       secure: isProduction,             // só HTTPS em produção
-      sameSite: isProduction ? 'lax' : 'lax', // em produção = Lax (primeira parte), dev pode ser Lax também
+      sameSite: "none", // em produção = Lax (primeira parte), dev pode ser Lax também
       maxAge: remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
     });
 
@@ -113,8 +113,8 @@ export async function loginAnonimo(req: Request, res: Response) {//verificado
 
     res.cookie("token", token, {
       httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
+      sameSite: process.env.NODE_ENV === "none" ,
+      secure: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 

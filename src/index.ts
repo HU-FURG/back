@@ -27,15 +27,27 @@ const app = express();
 app.use(express.json());
 
 app.use(express.static(path.join(__dirname, '../public')));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3333",
+  "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app"
+];
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || 'http://localhost:3333' || "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app",
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // permite Postman / server-to-server
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', "PATCH", "HEAD"],
   allowedHeaders: ['Content-Type', 'Authorization', "If-None-Match"],
   exposedHeaders: ['ETag'],
   credentials: true,
 }));
-
 app.use(cookieParser()); 
 
 morgan.token('body', (req: any) => JSON.stringify(req.body));
