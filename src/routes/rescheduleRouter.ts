@@ -1,11 +1,15 @@
 
-// src/routes/roomRoutes.ts
 import { Router } from 'express';
-import { listReschedule } from '../controllers/reScheduleController';
+// 1. Adicione o createReschedule na importação
+import { listReschedule, createReschedule } from '../controllers/reScheduleController'; 
 import { authenticateToken } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.get('', listReschedule)
+// Rota para LISTAR (já existia)
+router.get('', listReschedule);
+
+// 2. Adicione esta rota para SALVAR (O botão Finalizar chama aqui)
+router.post('', createReschedule);
 
 export default router;
