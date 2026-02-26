@@ -19,17 +19,17 @@ router.post('/tempoMedio', authenticateToken, (req, res) => dashboardController.
 router.get('/dashboard/general', authenticateToken, (req, res) => dashboardController.getGeneralStats(req, res));
 
 // 2. Lista de Salas (Com busca por nome/bloco)
-// GET /dashboard/rooms?block=X&month=Y&year=Z&search=Sala1
-router.get('/dashboard/rooms', authenticateToken, (req, res) => dashboardController.getRoomsList(req, res));
+// // GET /dashboard/rooms?block=X&month=Y&year=Z&search=Sala1
+// router.get('/dashboard/rooms', authenticateToken, (req, res) => dashboardController.getRoomsList(req, res));
 
-// 3. Lista de Usuários (Com busca por nome/login)
-// GET /dashboard/users?block=X&month=Y&year=Z&search=joao
-router.get('/dashboard/users', authenticateToken, (req, res) => dashboardController.getUsersList(req, res));
+// // 3. Lista de Usuários (Com busca por nome/login)
+// // GET /dashboard/users?block=X&month=Y&year=Z&search=joao
+// router.get('/dashboard/users', authenticateToken, (req, res) => dashboardController.getUsersList(req, res));
 
-// 4. Detalhe da Sala
-// GET /dashboard/room-detail?roomId=SALA-101&month=Y&year=Z
-router.get('/dashboard/room-detail', authenticateToken, (req, res) => dashboardController.getIndividualRoomStats(req, res));
+// // 4. Detalhe da Sala
+// // GET /dashboard/room-detail?roomId=SALA-101&month=Y&year=Z
+// router.get('/dashboard/room-detail', authenticateToken, (req, res) => dashboardController.getIndividualRoomStats(req, res));
 
-router.get('/dashboard/user-detail', authenticateToken, (req, res) => dashboardController.getIndividualUserStats(req, res))
+// router.get('/dashboard/user-detail', authenticateToken, (req, res) => dashboardController.getIndividualUserStats(req, res))
 
 export default router;

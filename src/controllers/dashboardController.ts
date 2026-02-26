@@ -219,7 +219,9 @@ async getGeneralStats(req: Request, res: Response) {
       // 2. Conta TOTAL DE SALAS ATIVAS 
       const totalRoomsCount = await prisma.room.count({
         where: {
-            bloco: block && block !== "Todos" ? block : undefined,
+            bloco: {
+                nome: block && block !== "Todos" ? block : undefined
+            },
             active: true 
         }
       });
@@ -304,275 +306,312 @@ async getGeneralStats(req: Request, res: Response) {
 }
 
 
-  async getIndividualUserStats(req: Request, res: Response) {
-    try {
-        const { userId, month, year } = IndividualUserQuerySchema.parse(req.query);
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
-        endDate.setHours(23, 59, 59);
+  // async getIndividualUserStats(req: Request, res: Response) {
+  //   try {
+  //       const { userId, month, year } = IndividualUserQuerySchema.parse(req.query);
+  //       const startDate = new Date(year, month - 1, 1);
+  //       const endDate = new Date(year, month, 0);
+  //       endDate.setHours(23, 59, 59);
 
-        const reports = await prisma.dailyRoomReport.findMany({
-            where: {
-                date: { gte: startDate, lte: endDate },
-                attendedUsersList: {
-                    path: ['$'], // <--- CORREÇÃO DO ARRAY DE STRINGS PARA O PRISMA
-                    array_contains: [{ userId: userId }] 
-                }
+  //       const reports = await prisma.dailyRoomReport.findMany({
+  //           where: {
+  //               date: { gte: startDate, lte: endDate },
+  //               attendedUsersList: {
+  //                   path: ['$'], // <--- CORREÇÃO DO ARRAY DE STRINGS PARA O PRISMA
+  //                   array_contains: [{ userId: userId }] 
+  //               }
+  //           },
+  //           orderBy: { date: 'asc' }
+  //       });
+
+  //       // 1. Gráfico de Atividade Diária
+  //       const dailyActivity = reports.reduce((acc: any[], curr) => {
+  //           const day = new Date(curr.date).getDate().toString();
+  //           const existingDay = acc.find(d => d.day === day);
+  //           if (existingDay) {
+  //               existingDay.reservas += 1;
+  //           } else {
+  //               acc.push({ day, reservas: 1 });
+  //           }
+  //           return acc;
+  //       }, []);
+        
+  //       // 2. Salas Mais Usadas
+  //       const roomCountMap = new Map<string, number>();
+  //       reports.forEach(rep => {
+  //           const roomName = rep.roomIdAmbiente;
+  //           roomCountMap.set(roomName, (roomCountMap.get(roomName) || 0) + 1);
+  //       });
+  //       const topRooms = Array.from(roomCountMap.entries())
+  //           .map(([name, count]) => ({ name, count }))
+  //           .sort((a, b) => b.count - a.count)
+  //           .slice(0, 5);
+
+  //       // 3. Totais e Turno
+  //       const totalReservas = reports.length;
+  //       let turnos = { "Manhã": 0, "Tarde": 0 };
+        
+  //       reports.forEach(rep => {
+  //            const users = rep.attendedUsersList as any[];
+  //            const userEntry = users.find(u => u.userId === userId);
+  //            if (userEntry && userEntry.turno) {
+  //                turnos[userEntry.turno as keyof typeof turnos] = (turnos[userEntry.turno as keyof typeof turnos] || 0) + 1;
+  //            }
+  //       });
+
+  //       return res.json({
+  //           dailyActivity,
+  //           topRooms,
+  //           summary: {
+  //               totalReservas,
+  //               turnoPreferido: turnos["Manhã"] > turnos["Tarde"] ? "Manhã" : "Tarde"
+  //           }
+  //       });
+
+  //   } catch (error) {
+  //       console.error(error);
+  //       return res.status(400).json({ error: "Erro ao buscar detalhes do usuário." });
+  //   }
+  // }
+
+  // async getRoomsList(req: Request, res: Response) {
+  //   try {
+  //     const { block, month, year, search } = DashboardQuerySchema.parse(req.query);
+  //     const startDate = new Date(year, month - 1, 1);
+  //     const endDate = new Date(year, month, 0);
+
+  //     const whereCondition: any = { AND: [] };
+  //     if (block && block !== "Todos") whereCondition.AND.push({ bloco: block });
+  //     if (search) {
+  //       whereCondition.AND.push({
+  //           OR: [
+  //               { ID_Ambiente: { contains: search, mode: 'insensitive' } },
+  //               { bloco: { contains: search, mode: 'insensitive' } }
+  //           ]
+  //       });
+  //     }
+
+  //     const staticRooms = await prisma.room.findMany({ where: whereCondition });
+  //     const roomsStats = await prisma.roomStats.findMany({
+  //       where: {
+  //           roomBloco: block && block !== "Todos" ? block : undefined,
+  //           monthRef: { gte: startDate, lte: endDate }
+  //       }
+  //     });
+
+  //     const tableData = staticRooms.map(room => {
+  //       const stat = roomsStats.find(s => s.roomIdAmbiente === room.ID_Ambiente);
+  //       return {
+  //           id: room.id,
+  //           ID_Ambiente: room.ID_Ambiente,
+  //           bloco: room.blocoId,
+  //           especialidade: room.especialidadeId,
+  //           tipo: room.tipo,
+  //           banheiro: room.banheiro,
+  //           usadoHoras: stat ? Math.round(stat.totalUsedMin / 60) : 0,
+  //           eficiencia: stat?.avgUsageRate ? (stat.avgUsageRate * 100).toFixed(1) : "0.0",
+  //           totalAgendamentos: stat?.totalBookings || 0,
+  //           totalCancelados: stat?.totalCanceled || 0
+  //       };
+  //     });
+
+  //     tableData.sort((a, b) => parseFloat(b.eficiencia) - parseFloat(a.eficiencia));
+  //     return res.json(tableData);
+  //   } catch (error) {
+  //       return res.status(400).json({ error: "Erro ao buscar lista de salas." });
+  //   }
+  // }
+
+  // async getUsersList(req: Request, res: Response) {
+  //   try {
+  //     const { block, month, year, search } = DashboardQuerySchema.parse(req.query);
+  //     const startDate = new Date(year, month - 1, 1);
+  //     const endDate = new Date(year, month, 0);
+  //     endDate.setHours(23, 59, 59);
+
+  //     const reports = await prisma.dailyRoomReport.findMany({
+  //       where: {
+  //           date: { gte: startDate, lte: endDate },
+  //           roomBloco: block && block !== "Todos" ? block : undefined
+  //       },
+  //       select: { attendedUsersList: true, roomIdAmbiente: true }
+  //     });
+
+  //     const userMap = new Map<number, any>();
+  //     const userIdsToFetch = new Set<number>();
+
+  //     reports.forEach(rep => {
+  //        const users = rep.attendedUsersList as any[];
+  //        if (users && Array.isArray(users)) {
+  //           users.forEach(u => {
+  //               if (!u.userId) return;
+  //               userIdsToFetch.add(u.userId);
+  //               if (!userMap.has(u.userId)) {
+  //                   userMap.set(u.userId, {
+  //                       id: u.userId,
+  //                       nomeJson: u.nome || "Usuário", 
+  //                       totalReservas: 0,
+  //                       roomsCount: {} as Record<string, number>,
+  //                       shifts: { "Manhã": 0, "Tarde": 0 }
+  //                   });
+  //               }
+  //               const userStat = userMap.get(u.userId);
+  //               userStat.totalReservas += 1;
+  //               userStat.roomsCount[rep.roomIdAmbiente] = (userStat.roomsCount[rep.roomIdAmbiente] || 0) + 1;
+  //               if (u.turno) userStat.shifts[u.turno] = (userStat.shifts[u.turno] || 0) + 1;
+  //           });
+  //        }
+  //     });
+
+  //     const dbUsers = await prisma.user.findMany({
+  //       where: { id: { in: Array.from(userIdsToFetch) } },
+  //       select: { id: true, login: true, nome: true }
+  //     });
+  //     const dbUserMap = new Map(dbUsers.map(u => [u.id, u]));
+
+  //     let usersList = Array.from(userMap.values()).map(u => {
+  //       const dbUser = dbUserMap.get(u.id);
+  //       let mostUsedRoom = "-";
+  //       let maxCount = 0;
+  //       Object.entries(u.roomsCount).forEach(([room, count]: [string, any]) => {
+  //           if (count > maxCount) { maxCount = count; mostUsedRoom = room; }
+  //       });
+  //       const morning = u.shifts["Manhã"] || 0;
+  //       const afternoon = u.shifts["Tarde"] || 0;
+  //       const period = morning > afternoon ? "Manhã" : (afternoon > morning ? "Tarde" : "Variado");
+
+  //       return {
+  //           id: u.id,
+  //           nome: dbUser?.nome || u.nomeJson,
+  //           login: dbUser?.login || "-",
+  //           totalReservas: u.totalReservas,
+  //           salaMaisUsada: mostUsedRoom,
+  //           periodoPreferido: period,
+  //           faltas: 0
+  //       };
+  //     });
+
+  //     if (search) {
+  //       const lowerSearch = search.toLowerCase();
+  //       usersList = usersList.filter(u => 
+  //           (u.nome && u.nome.toLowerCase().includes(lowerSearch)) || 
+  //           (u.login && u.login.toLowerCase().includes(lowerSearch))
+  //       );
+  //     }
+  //     usersList.sort((a, b) => b.totalReservas - a.totalReservas);
+  //     return res.json(usersList);
+  //   } catch (error) {
+  //       return res.status(400).json({ error: "Erro ao buscar lista de usuários." });
+  //   }
+  // }
+
+  // async getIndividualRoomStats(req: Request, res: Response) {
+  //   try {
+  //       const { roomId, month, year } = IndividualRoomQuerySchema.parse(req.query);
+  //       const startDate = new Date(year, month - 1, 1);
+  //       const endDate = new Date(year, month, 0);
+  //       endDate.setHours(23, 59, 59);
+
+  //       const dailyReports = await prisma.dailyRoomReport.findMany({
+  //           where: {
+  //               roomIdAmbiente: roomId,
+  //               date: { gte: startDate, lte: endDate }
+  //           },
+  //           orderBy: { date: 'asc' }
+  //       });
+
+  //       const dailyComparison = dailyReports.map(day => ({
+  //           day: new Date(day.date).getDate().toString(),
+  //           used: day.totalUsedMinutes ? Math.round(day.totalUsedMinutes / 60) : 0,
+  //           reserved: day.totalUnusedMinutes ? Math.round((day.totalUsedMinutes! + day.totalUnusedMinutes!) / 60) : 0 
+  //       }));
+
+  //       const userMap = new Map();
+  //       dailyReports.forEach(day => {
+  //           const users = day.attendedUsersList as any[];
+  //           if(users && Array.isArray(users)) {
+  //               users.forEach(u => {
+  //                   const current = userMap.get(u.nome) || 0;
+  //                   userMap.set(u.nome, current + 1);
+  //               });
+  //           }
+  //       });
+
+  //       const topUsers = Array.from(userMap.entries())
+  //           .map(([name, count]) => ({ name, count }))
+  //           .sort((a, b) => b.count - a.count)
+  //           .slice(0, 5);
+
+  //       const totalUsed = dailyReports.reduce((acc, curr) => acc + (curr.totalUsedMinutes || 0), 0);
+  //       const totalCanceled = dailyReports.reduce((acc, curr) => acc + (curr.cancellationCount || 0), 0);
+
+  //       return res.json({
+  //           dailyComparison,
+  //           topUsers,
+  //           totalUsedHours: Math.round(totalUsed / 60),
+  //           totalCanceled
+  //       });
+  //   } catch (error) {
+  //       return res.status(400).json({ error: "Erro ao buscar detalhe da sala." });
+  //   }
+  // }
+
+async searchUniversal(req: Request, res: Response) {
+    try {
+      const termo = String(req.query.termo || "").trim();
+      if (!termo) return res.json([]);
+
+      const rooms = await prisma.room.findMany({
+        where: {
+          OR: [
+            {
+              ID_Ambiente: {
+                contains: termo,
+                mode: 'insensitive'
+              }
             },
-            orderBy: { date: 'asc' }
-        });
-
-        // 1. Gráfico de Atividade Diária
-        const dailyActivity = reports.reduce((acc: any[], curr) => {
-            const day = new Date(curr.date).getDate().toString();
-            const existingDay = acc.find(d => d.day === day);
-            if (existingDay) {
-                existingDay.reservas += 1;
-            } else {
-                acc.push({ day, reservas: 1 });
+            {
+              bloco: {
+                nome: {
+                  contains: termo,
+                  mode: 'insensitive'
+                }
+              }
             }
-            return acc;
-        }, []);
-        
-        // 2. Salas Mais Usadas
-        const roomCountMap = new Map<string, number>();
-        reports.forEach(rep => {
-            const roomName = rep.roomIdAmbiente;
-            roomCountMap.set(roomName, (roomCountMap.get(roomName) || 0) + 1);
-        });
-        const topRooms = Array.from(roomCountMap.entries())
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 5);
-
-        // 3. Totais e Turno
-        const totalReservas = reports.length;
-        let turnos = { "Manhã": 0, "Tarde": 0 };
-        
-        reports.forEach(rep => {
-             const users = rep.attendedUsersList as any[];
-             const userEntry = users.find(u => u.userId === userId);
-             if (userEntry && userEntry.turno) {
-                 turnos[userEntry.turno as keyof typeof turnos] = (turnos[userEntry.turno as keyof typeof turnos] || 0) + 1;
-             }
-        });
-
-        return res.json({
-            dailyActivity,
-            topRooms,
-            summary: {
-                totalReservas,
-                turnoPreferido: turnos["Manhã"] > turnos["Tarde"] ? "Manhã" : "Tarde"
-            }
-        });
-
-    } catch (error) {
-        console.error(error);
-        return res.status(400).json({ error: "Erro ao buscar detalhes do usuário." });
-    }
-  }
-
-  async getRoomsList(req: Request, res: Response) {
-    try {
-      const { block, month, year, search } = DashboardQuerySchema.parse(req.query);
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
-
-      const whereCondition: any = { AND: [] };
-      if (block && block !== "Todos") whereCondition.AND.push({ bloco: block });
-      if (search) {
-        whereCondition.AND.push({
-            OR: [
-                { ID_Ambiente: { contains: search, mode: 'insensitive' } },
-                { bloco: { contains: search, mode: 'insensitive' } }
-            ]
-        });
-      }
-
-      const staticRooms = await prisma.room.findMany({ where: whereCondition });
-      const roomsStats = await prisma.roomStats.findMany({
-        where: {
-            roomBloco: block && block !== "Todos" ? block : undefined,
-            monthRef: { gte: startDate, lte: endDate }
-        }
-      });
-
-      const tableData = staticRooms.map(room => {
-        const stat = roomsStats.find(s => s.roomIdAmbiente === room.ID_Ambiente);
-        return {
-            id: room.id,
-            ID_Ambiente: room.ID_Ambiente,
-            bloco: room.bloco,
-            especialidade: room.especialidadeId,
-            tipo: room.tipo,
-            banheiro: room.banheiro,
-            usadoHoras: stat ? Math.round(stat.totalUsedMin / 60) : 0,
-            eficiencia: stat?.avgUsageRate ? (stat.avgUsageRate * 100).toFixed(1) : "0.0",
-            totalAgendamentos: stat?.totalBookings || 0,
-            totalCancelados: stat?.totalCanceled || 0
-        };
-      });
-
-      tableData.sort((a, b) => parseFloat(b.eficiencia) - parseFloat(a.eficiencia));
-      return res.json(tableData);
-    } catch (error) {
-        return res.status(400).json({ error: "Erro ao buscar lista de salas." });
-    }
-  }
-
-  async getUsersList(req: Request, res: Response) {
-    try {
-      const { block, month, year, search } = DashboardQuerySchema.parse(req.query);
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0);
-      endDate.setHours(23, 59, 59);
-
-      const reports = await prisma.dailyRoomReport.findMany({
-        where: {
-            date: { gte: startDate, lte: endDate },
-            roomBloco: block && block !== "Todos" ? block : undefined
+          ]
         },
-        select: { attendedUsersList: true, roomIdAmbiente: true }
+        take: 3,
+        select: { ID_Ambiente: true }
       });
 
-      const userMap = new Map<number, any>();
-      const userIdsToFetch = new Set<number>();
-
-      reports.forEach(rep => {
-         const users = rep.attendedUsersList as any[];
-         if (users && Array.isArray(users)) {
-            users.forEach(u => {
-                if (!u.userId) return;
-                userIdsToFetch.add(u.userId);
-                if (!userMap.has(u.userId)) {
-                    userMap.set(u.userId, {
-                        id: u.userId,
-                        nomeJson: u.nome || "Usuário", 
-                        totalReservas: 0,
-                        roomsCount: {} as Record<string, number>,
-                        shifts: { "Manhã": 0, "Tarde": 0 }
-                    });
-                }
-                const userStat = userMap.get(u.userId);
-                userStat.totalReservas += 1;
-                userStat.roomsCount[rep.roomIdAmbiente] = (userStat.roomsCount[rep.roomIdAmbiente] || 0) + 1;
-                if (u.turno) userStat.shifts[u.turno] = (userStat.shifts[u.turno] || 0) + 1;
-            });
-         }
+      const users = await prisma.user.findMany({
+        where: {
+          nome: {
+            contains: termo,
+            mode: 'insensitive'
+          }
+        },
+        take: 3,
+        select: { nome: true }
       });
 
-      const dbUsers = await prisma.user.findMany({
-        where: { id: { in: Array.from(userIdsToFetch) } },
-        select: { id: true, login: true, nome: true }
-      });
-      const dbUserMap = new Map(dbUsers.map(u => [u.id, u]));
+      const results = [
+        ...rooms.map(r => ({
+          label: `Sala: ${r.ID_Ambiente}`,
+          value: r.ID_Ambiente,
+          type: 'room'
+        })),
+        ...users.map(u => ({
+          label: `Usuário: ${u.nome}`,
+          value: u.nome,
+          type: 'user'
+        }))
+      ];
 
-      let usersList = Array.from(userMap.values()).map(u => {
-        const dbUser = dbUserMap.get(u.id);
-        let mostUsedRoom = "-";
-        let maxCount = 0;
-        Object.entries(u.roomsCount).forEach(([room, count]: [string, any]) => {
-            if (count > maxCount) { maxCount = count; mostUsedRoom = room; }
-        });
-        const morning = u.shifts["Manhã"] || 0;
-        const afternoon = u.shifts["Tarde"] || 0;
-        const period = morning > afternoon ? "Manhã" : (afternoon > morning ? "Tarde" : "Variado");
-
-        return {
-            id: u.id,
-            nome: dbUser?.nome || u.nomeJson,
-            login: dbUser?.login || "-",
-            totalReservas: u.totalReservas,
-            salaMaisUsada: mostUsedRoom,
-            periodoPreferido: period,
-            faltas: 0
-        };
-      });
-
-      if (search) {
-        const lowerSearch = search.toLowerCase();
-        usersList = usersList.filter(u => 
-            (u.nome && u.nome.toLowerCase().includes(lowerSearch)) || 
-            (u.login && u.login.toLowerCase().includes(lowerSearch))
-        );
-      }
-      usersList.sort((a, b) => b.totalReservas - a.totalReservas);
-      return res.json(usersList);
+      return res.json(results);
     } catch (error) {
-        return res.status(400).json({ error: "Erro ao buscar lista de usuários." });
-    }
-  }
-
-  async getIndividualRoomStats(req: Request, res: Response) {
-    try {
-        const { roomId, month, year } = IndividualRoomQuerySchema.parse(req.query);
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0);
-        endDate.setHours(23, 59, 59);
-
-        const dailyReports = await prisma.dailyRoomReport.findMany({
-            where: {
-                roomIdAmbiente: roomId,
-                date: { gte: startDate, lte: endDate }
-            },
-            orderBy: { date: 'asc' }
-        });
-
-        const dailyComparison = dailyReports.map(day => ({
-            day: new Date(day.date).getDate().toString(),
-            used: day.totalUsedMinutes ? Math.round(day.totalUsedMinutes / 60) : 0,
-            reserved: day.totalUnusedMinutes ? Math.round((day.totalUsedMinutes! + day.totalUnusedMinutes!) / 60) : 0 
-        }));
-
-        const userMap = new Map();
-        dailyReports.forEach(day => {
-            const users = day.attendedUsersList as any[];
-            if(users && Array.isArray(users)) {
-                users.forEach(u => {
-                    const current = userMap.get(u.nome) || 0;
-                    userMap.set(u.nome, current + 1);
-                });
-            }
-        });
-
-        const topUsers = Array.from(userMap.entries())
-            .map(([name, count]) => ({ name, count }))
-            .sort((a, b) => b.count - a.count)
-            .slice(0, 5);
-
-        const totalUsed = dailyReports.reduce((acc, curr) => acc + (curr.totalUsedMinutes || 0), 0);
-        const totalCanceled = dailyReports.reduce((acc, curr) => acc + (curr.cancellationCount || 0), 0);
-
-        return res.json({
-            dailyComparison,
-            topUsers,
-            totalUsedHours: Math.round(totalUsed / 60),
-            totalCanceled
-        });
-    } catch (error) {
-        return res.status(400).json({ error: "Erro ao buscar detalhe da sala." });
-    }
-  }
-
-  async searchUniversal(req: Request, res: Response) {
-    try {
-        const termo = String(req.query.termo || "").trim();
-        if (!termo) return res.json([]);
-        const rooms = await prisma.room.findMany({
-            where: { OR: [{ ID_Ambiente: { contains: termo, mode: 'insensitive' } }, { bloco: { contains: termo, mode: 'insensitive' } }] },
-            take: 3, select: { ID_Ambiente: true }
-        });
-        const users = await prisma.user.findMany({
-            where: { nome: { contains: termo, mode: 'insensitive' } },
-            take: 3, select: { nome: true }
-        });
-        const results = [
-            ...rooms.map(r => ({ label: `Sala: ${r.ID_Ambiente}`, value: r.ID_Ambiente, type: 'room' })),
-            ...users.map(u => ({ label: `Usuário: ${u.nome}`, value: u.nome, type: 'user' }))
-        ];
-        return res.json(results);
-    } catch (error) {
-        return res.status(400).json([]);
+      console.error(error);
+      return res.status(400).json([]);
     }
   }
 }

@@ -4,10 +4,10 @@ import { prisma } from '../prisma/client';
 import { z } from 'zod';
 import { debugLog } from '../auxiliar/debugLog';
 import { Prisma, RoomPeriod } from '@prisma/client';
-import { cancelAndArchivePeriods, checkActiveRoomConflicts, TransactionClient } from '../auxiliar/roomAuxi';
+import { cancelAndArchivePeriods, checkActiveRoomConflicts } from '../auxiliar/roomAuxi';
+import { DateTime } from 'luxon';
 
 
-// ✅ Criação de sala
 // ✅ Criação de sala
 export async function createRoom(req: Request, res: Response) {
   const schema = z.object({
@@ -81,59 +81,87 @@ export async function createRoom(req: Request, res: Response) {
   }
 }
 
-
 // ✅ Listar salas
 export async function listRooms(req: Request, res: Response) {
   try {
-    const userAuth = (req as any).user
+    const userAuth = (req as any).user;
 
+    if (!userAuth?.userId) {
+      return res.status(401).json({ error: "Usuário não autenticado" });
+    }
+
+    // =========================
+    // USUÁRIO LOGADO
+    // =========================
     const usuario = await prisma.user.findUnique({
       where: { id: userAuth.userId },
       include: {
         especialidade: true,
       },
-    })
+    });
 
     if (!usuario) {
-      return res.status(401).json({ error: "Usuário não encontrado" })
+      return res.status(401).json({ error: "Usuário não encontrado" });
     }
 
-    // ADMIN vê tudo
+    // =========================
+    // ADMIN → VÊ TUDO
+    // =========================
     if (usuario.hierarquia === "admin") {
       const rooms = await prisma.room.findMany({
-        include: { especialidade: true, bloco: true},
-      })
-      return res.json({ data: rooms })
+        include: {
+          bloco: true,
+          especialidade: true,
+        },
+      });
+
+      return res.status(200).json({ data: rooms });
     }
 
+    // =========================
+    // USER COMUM
+    // =========================
     const rooms = await prisma.room.findMany({
       where: { active: true },
       include: {
-        especialidade: true,
+        bloco: true,
+        especialidade: {
+          include: {
+            especialidadesAceitas: true, // 🔥 relação correta
+          },
+        },
       },
-    })
+    });
 
-    const especialidadeUser = usuario.especialidade?.nome
+    const especialidadeUserId = usuario.especialidadeId;
 
     const salasFiltradas = rooms.filter((room) => {
-    if (room.tipo.toLowerCase() === "diferenciado") return true
+      // Sala diferenciada sempre liberada
+      if (room.tipo.toLowerCase() === "diferenciado") {
+        return true;
+      }
 
-    const aceitas = room.especialidade?.especialidadesAceitas
-      ? JSON.parse(room.especialidade.especialidadesAceitas)
-      : []
+      // Sala sem especialidade definida → bloqueia
+      if (!room.especialidade) {
+        return false;
+      }
 
-    if (aceitas.includes("any")) return true
-    if (!especialidadeUser) return false
+      // Sem especialidade no usuário → não pode
+      if (!especialidadeUserId) {
+        return false;
+      }
 
-    return aceitas.includes(especialidadeUser)
-  })
+      // Verifica relação MANY-TO-MANY corretamente
+      return room.especialidade.especialidadesAceitas.some(
+        (esp) => esp.id === especialidadeUserId
+      );
+    });
 
-
-    return res.status(200).json({ data: salasFiltradas })
+    return res.status(200).json({ data: salasFiltradas });
 
   } catch (error) {
-    console.error("Erro ao listar salas:", error)
-    return res.status(500).json({ error: "Erro interno do servidor" })
+    console.error("Erro ao listar salas:", error);
+    return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
 
@@ -399,65 +427,66 @@ export async function getRoomSchedule(req: Request, res: Response) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  if (!roomId || isNaN(Number(roomId))) {
+  const roomIdNumber = Number(roomId);
+  if (Number.isNaN(roomIdNumber)) {
     return res.status(400).json({ message: "ID da sala inválido." });
   }
 
-  // Buscar nível do usuário
-  const userData = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { hierarquia: true },
-  });
-
-  const isAdmin = userData?.hierarquia === "admin";
-
   try {
-    const roomIdNumber = Number(roomId);
-
-    // Buscar todas as reservas da sala
     const reservations = await prisma.roomPeriod.findMany({
       where: { roomId: roomIdNumber },
+      include: {
+        room: {
+          select: {
+            id: true,
+            ID_Ambiente: true,
+            tipo: true,
+            bloco: {
+              select: { id: true, nome: true },
+            },
+          },
+        },
+        scheduledFor: {
+          select: { id: true, login: true, nome: true },
+        },
+        createdBy: {
+          select: { id: true, login: true, nome: true },
+        },
+      },
       orderBy: { start: "asc" },
     });
 
-    const formattedSchedule = reservations.map((r) => {
-      const startTimeDate = new Date(r.start);
-      const endTimeDate = new Date(r.end);
-
-      const jsDay = startTimeDate.getDay();
-      const dayOfWeek = jsDay === 0 ? 7 : jsDay;
+    const formatted = reservations.map((r) => {
+      const startDT = DateTime.fromJSDate(r.start).setZone("America/Sao_Paulo");
+      const endDT = DateTime.fromJSDate(r.end).setZone("America/Sao_Paulo");
 
       return {
         id: r.id,
-        dayOfWeek,
 
-        // Horários formatados
-        startTime: startTimeDate.toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        endTime: endTimeDate.toLocaleTimeString("pt-BR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
+        dayOfWeek: r.isRecurring ? r.weekday : undefined,
 
-        // Informações usadas pelo client
+        startTime: startDT.toFormat("HH:mm"),
+        endTime: endDT.toFormat("HH:mm"),
+
+        start: startDT.toISO(),
+        end: endDT.toISO(),
+
+        startSchedule: r.startSchedule,
+        endSchedule: r.endSchedule,
+        countRecurrence: r.countRecurrence,
+        atualRecurrenceCount: r.atualRecurrenceCount,
+
         isRecurring: r.isRecurring,
         approved: r.approved,
+        typeSchedule: r.typeSchedule,
 
-        // Datas completas (sempre enviadas)
-        start: r.start,
-        end: r.end,
-        maxScheduleTime: r.maxScheduleTime,
-        // Só admin vê:
-        ...(isAdmin && {
-          nome: r.nome,
-          userId: r.userId
-        }),
+        room: r.room,
+        createdBy: r.createdBy,
+        scheduledFor: r.scheduledFor ?? null,
       };
     });
 
-    return res.status(200).json(formattedSchedule);
+    return res.status(200).json(formatted);
   } catch (error) {
     console.error(`Erro ao buscar agenda da sala ${roomId}:`, error);
     return res.status(500).json({
@@ -465,6 +494,8 @@ export async function getRoomSchedule(req: Request, res: Response) {
     });
   }
 }
+
+
 
 // ✅ Obter agenda de um bloco em um dia específico
 export async function getBlockDayGrade(req: Request, res: Response) {
@@ -475,12 +506,8 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  if (!block) {
-    return res.status(400).json({ message: "Bloco inválido." });
-  }
-
-  const blockNumber = Number(block);
-  if (isNaN(blockNumber)) {
+  const blocoId = Number(block);
+  if (Number.isNaN(blocoId)) {
     return res.status(400).json({ message: "Bloco inválido." });
   }
 
@@ -489,77 +516,152 @@ export async function getBlockDayGrade(req: Request, res: Response) {
   }
 
   try {
-    const startOfDay = new Date(`${date}T00:00:00.000Z`);
-    const endOfDay = new Date(`${date}T23:59:59.999Z`);
+    const dia = DateTime.fromISO(date, { zone: "America/Sao_Paulo" });
 
-    const userData = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { hierarquia: true },
-    });
+    const startOfDay = dia.startOf("day").toJSDate();
+    const endOfDay = dia.endOf("day").toJSDate();
 
-    const isAdmin = userData?.hierarquia === "admin";
-
-    // 🔹 Buscar todas as salas do bloco
+    // =========================
+    // SALAS DO BLOCO
+    // =========================
     const rooms = await prisma.room.findMany({
-      where: { blocoId: blockNumber },
+      where: { blocoId },
+      select: {
+        id: true,
+        ID_Ambiente: true,
+      },
     });
 
-    if (rooms.length === 0) {
-      return res.status(404).json({ message: "Nenhuma sala encontrada nesse bloco." });
+    if (!rooms.length) {
+      return res
+        .status(404)
+        .json({ message: "Nenhuma sala encontrada nesse bloco." });
     }
 
-    // 🔹 Estrutura final agrupada por sala
-    const resultado: any[] = [];
+    const roomIds = rooms.map((r) => r.id);
 
-    // 🔹 Para cada sala, buscar SOMENTE as reservas dentro da data
-    for (const r of rooms) {
-      const reservas = await prisma.roomPeriod.findMany({
-        where: {
-          roomId: r.id,
-          start: { gte: startOfDay },
-          end: { lte: endOfDay }
+    // =========================
+    // BUSCA CANDIDATA DE RESERVAS
+    // =========================
+    const base = dia;
+
+    const reservas = await prisma.roomPeriod.findMany({
+  where: {
+    roomId: { in: roomIds },
+
+    OR: [
+      // 🔹 NÃO recorrente → data exata
+      {
+        isRecurring: false,
+        start: {
+          gte: startOfDay,
+          lte: endOfDay,
         },
-        orderBy: { start: "asc" },
-      });
+      },
 
-      // formatar horários
-      const horarios = reservas.map(res => {
-        const start = new Date(res.start);
-        const end = new Date(res.end);
+      // 🔹 Recorrente → weekday + intervalo válido
+      {
+        isRecurring: true,
+        weekday: dia.weekday,
+        startSchedule: { lte: endOfDay },
+        endSchedule: { gte: startOfDay },
+      },
+    ],
+  },
 
-        return {
-          id: res.id,
-          startTime: start.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-          endTime: end.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-          start: res.start,
-          end: res.end,
-          isRecurring: res.isRecurring,
-          approved: res.approved,
-          maxScheduleTime: res.maxScheduleTime,
+  include: {
+    scheduledFor: {
+      select: { id: true, login: true, nome: true },
+    },
+    createdBy: {
+      select: { login: true },
+    },
+  },
 
-          ...(isAdmin && {
-            nome: res.nome,
-            userId: res.userId
-          })
-        };
-      });
+  orderBy: { start: "asc" },
+});
 
-      // push na lista final
-      resultado.push({
-        roomId: r.id,
-        sala: r.ID_Ambiente,
-        horarios
-      });
+
+    // =========================
+    // FILTRO LÓGICO + PROJEÇÃO
+    // =========================
+    type Reserva = typeof reservas[number];
+    const reservasPorSala: Record<number, Reserva[]> = {};
+
+    for (const resv of reservas) {
+      const inicio = DateTime.fromJSDate(resv.start).setZone("America/Sao_Paulo");
+      const fimOriginal = DateTime.fromJSDate(resv.end).setZone("America/Sao_Paulo");
+
+      const startProjetado = dia.set({
+        hour: inicio.hour,
+        minute: inicio.minute,
+        second: 0,
+        millisecond: 0,
+      }).toJSDate();
+
+      const endProjetado = dia.set({
+        hour: fimOriginal.hour,
+        minute: fimOriginal.minute,
+        second: 0,
+        millisecond: 0,
+      }).toJSDate();
+
+      const reservaFinal = {
+        ...resv,
+        start: startProjetado,
+        end: endProjetado,
+      };
+
+      if (!reservasPorSala[resv.roomId]) {
+        reservasPorSala[resv.roomId] = [];
+      }
+
+      reservasPorSala[resv.roomId].push(reservaFinal);
     }
+
+    // =========================
+    // MONTA RESPOSTA FINAL
+    // =========================
+    const salas = rooms.map((room) => ({
+      roomId: room.id,
+      sala: room.ID_Ambiente,
+      horarios: (reservasPorSala[room.id] ?? []).map((resv) => ({
+        id: resv.id,
+
+        startTime: DateTime.fromJSDate(resv.start)
+          .setZone("America/Sao_Paulo")
+          .toFormat("HH:mm"),
+
+        endTime: DateTime.fromJSDate(resv.end)
+          .setZone("America/Sao_Paulo")
+          .toFormat("HH:mm"),
+
+        start: resv.start,
+        end: resv.end,
+
+        isRecurring: resv.isRecurring,
+        approved: resv.approved,
+
+        scheduledFor:
+          resv.scheduledFor?.nome ??
+          resv.scheduledFor?.login ??
+          null,
+
+        createdBy: resv.createdBy?.login ?? null,
+      })),
+    }));
 
     return res.status(200).json({
-      block,
+      blocoId,
       date,
-      salas: resultado
+      salas,
     });
-
   } catch (error) {
-    console.error(`Erro ao buscar agenda do bloco ${block}:`, error);
+    console.error(
+      `Erro ao buscar agenda do bloco ${block}:`,
+      error
+    );
+
     return res.status(500).json({
       error: "Erro interno ao buscar a agenda.",
     });

@@ -113,13 +113,13 @@ export function verificarConflitoUniversal(
   reqHoraInicio: string,    // "HH:mm"
   reqHoraFim: string,       // "HH:mm"
   reqIsRecorrente: boolean,
-  reqMaxMeses: number,      // SE FOR 0 = INFINITO
+  reqMaxRecurrenceEnd: string | null, 
 
   // --- DADOS DO BANCO ---
   dbStart: Date,            
   dbEnd: Date | null,       
   dbIsRecorrente: boolean,
-  dbMaxRecurrenceEnd: Date | null // SE FOR NULL = INFINITO
+  dbEndSchedule: Date | null // SE FOR NULL = INFINITO
 ): boolean {
 
   // =======================================================================
@@ -135,17 +135,18 @@ export function verificarConflitoUniversal(
   let reqVigenciaFim: DateTime;
 
   if (reqIsRecorrente) {
-      // Se for 0, significa "sem limite" (Infinito) -> Jogamos 100 anos pra frente
-      if (reqMaxMeses === 0) {
-          reqVigenciaFim = reqInicioDT.plus({ years: 100 }).endOf('day');
-      } else {
-          // Se tiver valor (ex: 6 meses), soma os meses
-          reqVigenciaFim = reqInicioDT.plus({ months: reqMaxMeses }).endOf('day');
-      }
+    if (!reqMaxRecurrenceEnd) {
+      // recorrência infinita
+      reqVigenciaFim = reqInicioDT.plus({ years: 100 }).endOf("day");
+    } else {
+      reqVigenciaFim = DateTime
+        .fromISO(reqMaxRecurrenceEnd, { zone: TZ })
+        .endOf("day");
+    }
   } else {
-      // Se não é recorrente, morre no mesmo dia
-      reqVigenciaFim = reqInicioDT.endOf('day');
+    reqVigenciaFim = reqInicioDT.endOf("day");
   }
+
 
   // --------------------------------------------------------
   // PREPARAÇÃO DO BANCO (DB)
@@ -156,10 +157,10 @@ export function verificarConflitoUniversal(
 
   if (dbIsRecorrente) {
       // CORREÇÃO 2: Se dbMaxRecurrenceEnd for null ou invalido, considera Infinito
-      if (!dbMaxRecurrenceEnd) {
+      if (!dbEndSchedule) {
           dbVigenciaFim = dbInicioDT.plus({ years: 100 }).endOf('day');
       } else {
-          dbVigenciaFim = DateTime.fromJSDate(dbMaxRecurrenceEnd).setZone(TZ).endOf('day');
+          dbVigenciaFim = DateTime.fromJSDate(dbEndSchedule).setZone(TZ).endOf('day');
       }
   } else {
       // Não recorrente: usa o dbEnd ou assume mesmo dia
@@ -170,9 +171,9 @@ export function verificarConflitoUniversal(
 
   // LOGS PARA CONFERIR SE O ZERO VIROU "FUTURO"
   /**/
-  console.log(`\n🔍 [VIGÊNCIA DEBUG]`);
-  console.log(`   Req (${reqIsRecorrente ? 'Rec' : 'Único'} | Meses: ${reqMaxMeses}): ${reqVigenciaInicio.toISODate()} até ${reqVigenciaFim.toISODate()}`);
-  console.log(`   DB  (${dbIsRecorrente  ? 'Rec' : 'Único'}): ${dbInicioDT.toISODate()} até ${dbVigenciaFim.toISODate()}`);
+  // console.log(`\n🔍 [VIGÊNCIA DEBUG]`);
+  // console.log(`   Req (${reqIsRecorrente ? 'Rec' : 'Único'} | Meses: ${reqMaxMeses}): ${reqVigenciaInicio.toISODate()} até ${reqVigenciaFim.toISODate()}`);
+  // console.log(`   DB  (${dbIsRecorrente  ? 'Rec' : 'Único'}): ${dbInicioDT.toISODate()} até ${dbVigenciaFim.toISODate()}`);
   
 
   // =======================================================================

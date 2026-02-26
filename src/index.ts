@@ -15,6 +15,8 @@ import userRoutes from './routes/userRoutes'
 import schedulingRoutes from './routes/schedulingRouter'
 import rescheduleRouter from './routes/rescheduleRouter'
 import configRoutes from './routes/configRoutes'
+import monitorRoutes from './routes/monitoramentoRoutes'
+import mapRoutes from  './routes/mapsRoutes'
 
 // routine
 import { clearPeriodsandUpdate } from './prisma/clear';
@@ -25,15 +27,27 @@ const app = express();
 app.use(express.json());
 
 app.use(express.static(path.join(__dirname, '../public')));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:3333",
+  "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app"
+];
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || 'http://localhost:3333' || "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app",
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true); // permite Postman / server-to-server
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', "PATCH", "HEAD"],
   allowedHeaders: ['Content-Type', 'Authorization', "If-None-Match"],
   exposedHeaders: ['ETag'],
   credentials: true,
 }));
-
 app.use(cookieParser()); 
 
 morgan.token('body', (req: any) => JSON.stringify(req.body));
@@ -46,6 +60,9 @@ app.use('/api', userRoutes); // sistema login get users CRUD usuarios
 app.use('/api', dashboardRoutes) // dashboard
 app.use('/api/config', configRoutes) // dashboard
 app.use('/api/scheduling', schedulingRoutes) // gerenciamento de agendamentos
+app.use('/api/maps', mapRoutes) // gerenciamento de mapas
+
+app.use('/api/monitor', monitorRoutes) // monitoramento
 app.use('/api/reschedule', rescheduleRouter) // reprogramação de agendamentos
 
 app.get('/health', (req, res) => res.sendStatus(200)); // rota de verificação de deploy
@@ -63,7 +80,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   const log = await getSystemLog('last_clear_update');
   const lastRun = log?.updatedAt ?? new Date(0);
   const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
-  if (diffHours >= 1) {
+  if (diffHours >= 24) {
     console.log('⚙️ Rodando rotina de limpeza atrasada no startup...');
     await clearPeriodsandUpdate();
   } else {

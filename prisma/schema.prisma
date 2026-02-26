@@ -1,7 +1,8 @@
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
+
 
 datasource db {
   provider  = "postgresql"
@@ -11,6 +12,23 @@ datasource db {
 enum Hierarquia {
   admin
   user
+}
+
+enum typeSchedule {
+  consulta
+  aula
+}
+
+enum PcEventType {
+  iniciou
+  usou
+  encerrou
+}
+
+enum availabilityStatus {
+  ok        //  poderia ser qualquer outra sala
+  bom       //  sala boa mas poderia ser outra parecida
+  excelente  //  Pouca probabilidade de ter salas similares disponiveis
 }
 
 model SystemLog { //controle do sistema
@@ -41,34 +59,40 @@ model User {
 
   // Relações 
   especialidade   EspecialidadeUser? @relation(fields: [especialidadeId], references: [id])
-  roomPeriods           RoomPeriod[]
+
+  periodsCreated   RoomPeriod[] @relation("PeriodCreatedBy")
+  periodsFor       RoomPeriod[] @relation("PeriodScheduledFor")
+  
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
-  histories             PeriodHistory[]
+}
+
+model EspecialidadeRoom {
+  id    Int    @id @default(autoincrement())
+  nome  String @unique
+
+  especialidadesAceitas EspecialidadeUser[] @relation("RoomAceitas")
+
+  rooms Room[]
 }
 
 model EspecialidadeUser {
   id    Int    @id @default(autoincrement())
   nome  String @unique
 
-  // relações
   users User[]
+
+  roomsAceitas EspecialidadeRoom[] @relation("RoomAceitas")
 }
 
-model EspecialidadeRoom {
-  id    Int    @id @default(autoincrement())
-  nome  String @unique
-  especialidadesAceitas String?
-
-  // relações
-  rooms Room[]
-}
 
 model BlocoRoom {
   id    Int    @id @default(autoincrement())
   nome  String @unique
 
   rooms Room[]
+
+  maps Map[]
 }
 
 
@@ -91,19 +115,54 @@ model Room {
   especialidade   EspecialidadeRoom @relation(fields: [especialidadeId], references: [id])
 
   periods RoomPeriod[]
+
+  mapRooms MapRoom[]
+}
+
+model PcUsageEvent {
+  id Int @id @default(autoincrement())
+
+  // =========================
+  // ORIGEM
+  // =========================
+  roomIdAmbiente String      // "x"
+  eventType      PcEventType // iniciou | usou | encerrou
+  targetApp      String?     // chrome.exe
+
+  // =========================
+  // TEMPO
+  // =========================
+  eventTime DateTime
+
+  createdAt  DateTime @default(now())
+
+  @@index([roomIdAmbiente, eventTime])
 }
 
 
 model RoomPeriod {
   id          Int      @id @default(autoincrement())
   roomId      Int
-  userId      Int?      // usuário que agendou
-  nome        String    // pra quem foi agendado
 
-  start       DateTime
-  end         DateTime
+  // controle de quem crio e para quem foi agendado
+  createdById Int
+  scheduledForId Int?
 
-  maxScheduleTime DateTime?
+  // dia de inicio dia de fim do agendamento, para controle de recorrência e métricas
+  startSchedule DateTime
+  endSchedule   DateTime
+  countRecurrence Int? 
+  atualRecurrenceCount Int? @default(0) // para controle de recorrência
+
+  // controle do dia
+  start       DateTime //foco na hora
+  end         DateTime //foco na hora
+  weekday     Int?     //dia da semana 
+
+  // avaliçao da reserva
+  availabilityStatus availabilityStatus? @default(ok)
+  // pra que proposito
+  typeSchedule typeSchedule? @default(consulta)
 
   isRecurring Boolean  @default(false)
   approved    Boolean  @default(false) // saber se foi realmente aprovado
@@ -112,11 +171,13 @@ model RoomPeriod {
   updatedAt   DateTime @updatedAt
 
   room Room  @relation(fields: [roomId], references: [id])
-  user User? @relation(fields: [userId], references: [id])
+  createdBy   User @relation("PeriodCreatedBy", fields: [createdById], references: [id])
+  scheduledFor   User? @relation("PeriodScheduledFor", fields: [scheduledForId], references: [id])
 
   @@index([roomId, start])
   @@index([roomId, end])
-  @@index([userId])
+  @@index([createdById])
+  @@index([scheduledForId])
 }
 
 // --- Novo Sistema de Templates/Reagendamento ---
@@ -143,69 +204,103 @@ model RoomScheduleTemplate {
 
 // --- Histórico para Análises Individuais ---
 model PeriodHistory {
-  id             Int      @id @default(autoincrement())
+  id Int @id @default(autoincrement())
 
-  // Detalhe da sala 
-  roomIdAmbiente String   
+  // =========================
+  // SNAPSHOT DA SALA
+  // =========================
+  roomIdAmbiente String
   roomBloco      String
+  roomTipo       String?
 
-  // Detalhe de quem agendou
-  userId         Int?   
-  user           User?    @relation(fields: [userId], references: [id])  
+  // =========================
+  // IDS (SEM FK)
+  // =========================
+  createdById     Int?
+  scheduledForId  Int?
 
-  // Detalhes do Período
-  start          DateTime
-  end            DateTime
-  weekday        Int?     
+  // =========================
+  // SNAPSHOT USUÁRIO
+  // =========================
+  createdByLogin     String?
+  createdByNome      String?
+  scheduledForLogin  String?
+  scheduledForNome   String?
 
-  // Pra quem foi agendado
-  nome           String
-  used           Boolean @default(false)   
-  startService   DateTime?
-  endService     DateTime?  
+  // =========================
+  // PERÍODO
+  // =========================
+  start    DateTime
+  end      DateTime
+  weekday  Int?
 
-  // Para analise
+  used         Boolean  @default(false)
+  startService DateTime?
+  endService   DateTime?
+
+  // =========================
+  // MÉTRICAS
+  // =========================
   durationMinutes       Int?
-  actualDurationMinutes Int?  
-  archivedAt     DateTime @default(now())
+  actualDurationMinutes Int?
+
+  archivedAt DateTime @default(now())
 
   @@index([roomIdAmbiente])
-  @@index([weekday])
+  @@index([createdById])
+  @@index([scheduledForId])
   @@index([roomIdAmbiente, start])
-  @@index([roomIdAmbiente, weekday, used])
 }
 
+
 // Esta tabela deve ser preenchida por um Cron Job no final do dia (ex: 23:59)
-model DailyRoomReport {
+model PeriodReportDaily {
+  id             Int      @id @default(autoincrement())
+  
+  idPeriod       Int     // para referência cruzada entre reservadas do mesmo periodo agendado
+
+  // controle de quem crio e para quem foi agendado
+  createdById Int
+  scheduledForId Int
+  // horario q foi agendado
+  start       DateTime //foco na hora
+  end         DateTime //foco na hora
+  // tempo usado pela pessoa que agendou (diferença entre startService e endService)
+  totalUsedMinutes   Int?   
+
+   // avaliçao da reserva
+  availabilityStatus availabilityStatus? @default(ok)
+  // pra que proposito
+  typeSchedule typeSchedule?
+
+  // pegar referencia em pcusedreference ligar ambos para fim de saber se usou
+  used  Boolean? @default(true)
+  // relacionar com historico de sala no dia
+  roomDailyId Int
+
+  roomDaily   roomTimeUsedDaily @relation("roomDailyforId", fields: [roomDailyId], references: [id])
+  @@unique([idPeriod, roomDailyId])
+}
+
+// tempo usado na sala
+model roomTimeUsedDaily {
   id             Int      @id @default(autoincrement())
   
   // Data de referência do relatório (ex: 2023-10-25T00:00:00.000Z)
   date           DateTime 
   generatedAt    DateTime @default(now())
+  weekday       Int      // dia da semana (0-6)
 
   // Identificação da sala (Snapshot - string para manter histórico mesmo se Room for deletada)
   roomIdAmbiente String
   roomBloco      String
 
-  // Verifica se a sala estava ativa no sistema neste dia
-  wasActive      Boolean
-  totalUsedMinutes   Int?   
-
-  // Minutos ociosos (Tempo total disponível no dia - Tempo usado)
-  // *O cálculo do tempo total disponível depende da sua regra de negócio (ex: 8h as 18h = 600min)*
-  totalUnusedMinutes Int?   
-
-  // Quantidade de agendamentos que foram cancelados ou não realizados neste dia
-  cancellationCount  Int?
-
-  // Lista JSON com nomes e IDs das pessoas que efetivamente usaram a sala no dia
-  // Formato sugerido: [{"nome": "Carlos", "userId": 1}, {"nome": "Maria", "userId": null}]
-  attendedUsersList  Json?
+  totalUsedMinutes   Int   
 
   @@index([date])
   @@index([roomIdAmbiente, date])
+  periodReportDailies PeriodReportDaily[] @relation("roomDailyforId")
 }
-
 
 // guarda informações gerais de uso diario das salas pelo mês
 model RoomStats {
@@ -249,4 +344,33 @@ model Notification {
   createdAt     DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
+}
+
+
+// Mapas
+
+model Map {
+  id        Int    @id @default(autoincrement())
+  blocoId   Int    
+  nome      String
+  svgPath   String
+
+  // posição do mapa no frontend (para caso queira mostrar mais de um mapa)
+  posX Float
+  posY Float
+  andar Int
+
+  salas     MapRoom[]
+  
+  bloco    BlocoRoom @relation(fields: [blocoId], references: [id])
+}
+
+model MapRoom {
+  id         Int @id @default(autoincrement())
+  mapId      Int
+  roomId     Int 
+  svgElementId String
+
+  map  Map  @relation(fields: [mapId], references: [id])
+  room Room @relation(fields: [roomId], references: [id])
 }

@@ -53,11 +53,11 @@ export async function login(req: Request, res: Response) {
     console.log("Token JWT gerado:", token.substring(0, 20) + "...");
 
     const isProduction = process.env.NODE_ENV === "production";
-
+    
     res.cookie('token', token, {
       httpOnly: true,
       secure: isProduction,             // só HTTPS em produção
-      sameSite: isProduction ? 'lax' : 'lax', // em produção = Lax (primeira parte), dev pode ser Lax também
+      sameSite: isProduction ? "none" as const : "lax" as const,
       maxAge: remember ? 30 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000,
     });
 
@@ -110,11 +110,11 @@ export async function loginAnonimo(req: Request, res: Response) {//verificado
     );
 
     console.log(" Token anônimo gerado:", token.substring(0, 20) + "...");
-
+    const isProduction = process.env.NODE_ENV === "production";
     res.cookie("token", token, {
       httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      secure: process.env.NODE_ENV === "production",
+      sameSite: isProduction ? "none" as const : "lax" as const,
+      secure: true,
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -162,42 +162,93 @@ export function logout(req: Request, res: Response) {
 }
 
 const createUserSchema = z.object({
-  login: z.string().min(3, "Login muito curto"),
-  senha: z.string().min(4, "Senha muito curta"),
-  cargo: z.enum(["admin", "user"]).optional(),
-  email: z.string().email().optional(),
+  login: z.string().min(3),
+  senha: z.string().min(6),
+  cargo: z.enum(["admin", "user"]),
   nome: z.string().optional(),
-});
+  email: z.string().email().optional(),
+  especialidadeId: z.number().optional(),
+  descricao: z.string().optional(),
+  telefone: z.string().optional(),
+})
 
-export async function createUser(req: Request, res: Response) {//verificado
+
+export async function createUser(req: Request, res: Response) {
   try {
-    console.log("Criando usuário:", req.body);
+    console.log("Criando usuário:", req.body)
 
-    const { login, senha, cargo, email, nome } = createUserSchema.parse(req.body);
+    const {
+      login,
+      senha,
+      cargo,
+      nome,
+      email,
+      especialidadeId,
+      descricao,
+      telefone,
+    } = createUserSchema.parse(req.body)
 
-    // Verifica duplicidade
-    const exists = await prisma.user.findUnique({ where: { login } });
+    // 🔎 login duplicado
+    const existingLogin = await prisma.user.findUnique({
+      where: { login },
+    })
 
+    if (existingLogin) {
+      return res
+        .status(400)
+        .json({ error: "Usuário já existe" })
+    }
+
+    const exitingSpecialidade = especialidadeId
+      ? await prisma.especialidadeUser.findUnique({
+          where: { id: especialidadeId },
+        })
+      : false
+    
+    if (especialidadeId && !exitingSpecialidade) {
+      return res
+        .status(400)
+        .json({ error: "Especialidade não existe" })
+    }
+
+    let especialidadeIdAdmin: number | undefined = undefined;
+
+    if (cargo === "admin") {
+      especialidadeIdAdmin = await prisma.especialidadeUser.findFirst({
+        where: { nome: "Administrador" },
+      }).then(e => e?.id)
+    }
+
+    // 🔎 email duplicado
     if (email) {
-      const existingEmail = await prisma.user.findUnique({ where: { email } });
+      const existingEmail =
+        await prisma.user.findUnique({
+          where: { email },
+        })
+
       if (existingEmail) {
-        console.warn("E-mail já está em uso:", email);
-        return res.status(400).json({ error: "E-mail já está em uso" });
+        return res
+          .status(400)
+          .json({ error: "E-mail já está em uso" })
       }
     }
 
-    if (exists) {
-      console.warn("Usuário já existe:", login);
-      return res.status(400).json({ error: "Usuário já existe" });
+    let hashedPassword: string;
+
+    // 🔐 hash da senha
+    if (cargo === "user") {
+      hashedPassword = await bcrypt.hash("hospital", 10)
+    }
+    else {
+      hashedPassword = await bcrypt.hash(senha, 10)
     }
 
-    //  Criptografa senha
-    const hashedPassword = await bcrypt.hash(senha, 10);
+    // 🧠 hierarquia
+    const hierarquia =
+      cargo === "admin"
+        ? Hierarquia.admin
+        : Hierarquia.user
 
-    //  Define hierarquia (default = user)
-    const hierarquia = cargo === "admin" ? Hierarquia.admin : Hierarquia.user;
-
-    //  Cria novo usuário
     const newUser = await prisma.user.create({
       data: {
         login,
@@ -205,112 +256,131 @@ export async function createUser(req: Request, res: Response) {//verificado
         hierarquia,
         nome: nome || login,
         email,
+        telefone,
+        descricao,
         active: true,
+        especialidadeId:
+          hierarquia === Hierarquia.admin
+            ? especialidadeIdAdmin
+            : especialidadeId ?? null,
       },
-    });
+      include: {
+        especialidade: true,
+      },
+    })
 
-    console.log(" Usuário criado:", newUser.login, "-", newUser.hierarquia);
-    res.status(201).json({
-      success: true,
-      login: newUser.login,
-      hierarquia: newUser.hierarquia,
-    });
+    console.log(
+      "Usuário criado:",
+      newUser.login,
+      "-",
+      newUser.hierarquia,
+    )
 
+    return res.status(201).json(newUser)
   } catch (err) {
-    console.error("Erro ao criar usuário:", err);
-    if (err instanceof z.ZodError)
-      return res.status(400).json({ error: err.errors });
-    res.status(500).json({ error: "Erro interno no servidor" });
-  }
-}
+    console.error("Erro ao criar usuário:", err)
 
-export async function removeUser(req: Request, res: Response) { //verificado
-  try {
-    console.log("Removendo usuário:", req.body);
-
-    // 🔒 Validação segura
-    const schema = z.object({
-      login: z.string().min(1, "Login é obrigatório"),
-      force: z.boolean().optional(),
-    });
-
-    const parsed = schema.safeParse(req.body);
-
-    if (!parsed.success) {
+    if (err instanceof z.ZodError) {
       return res
         .status(400)
-        .json({ error: parsed.error.errors[0].message });
+        .json({ error: err.errors })
     }
 
-    const { login, force } = parsed.data;
-
-    // 🔎 Busca usuário
-    const user = await prisma.user.findUnique({ where: { login } });
-    if (!user) {
-      console.warn("⚠️ Usuário não encontrado:", login);
-      return res.status(404).json({ error: "Usuário não encontrado" });
-    }
-
-    // 🔍 Verifica reservas ativas
-    const reservasAtivas = await prisma.roomPeriod.findMany({
-      where: { userId: user.id, end: { gte: new Date() } },
-      include: { room: true },
-    });
-
-    // ❗ Se tiver reservas e não for "force", retorna aviso
-    if (reservasAtivas.length > 0 && !force) {
-      return res.status(400).json({
-        error:
-          "Usuário possui reservas ativas. Use 'force: true' para cancelar e remover.",
-      });
-    }
-
-    // ⚙️ Se for force, arquiva reservas antes de apagar
-    if (reservasAtivas.length > 0 && force) {
-      console.log(`⚠️ Cancelando ${reservasAtivas.length} reservas do usuário...`);
-
-      const templates = reservasAtivas.map((r) => {
-        const durationInMinutes =
-          (r.end.getTime() - r.start.getTime()) / (1000 * 60);
-
-        return {
-          userId: r.userId,
-          nome: r.nome,
-          durationInMinutes,
-          roomIdAmbiente: r.room?.ID_Ambiente ?? "Desconhecido",
-          roomBloco: r.room?.bloco ?? "Desconhecido",
-          originalStart: r.start,
-          originalEnd: r.end,
-          reason: "Cancelado por remoção de usuário",
-        };
-      });
-
-      // 🔄 Usa transação para garantir consistência
-      await prisma.$transaction([
-        prisma.roomScheduleTemplate.createMany({ data: templates }),
-        prisma.roomPeriod.deleteMany({ where: { userId: user.id } }),
-      ]);
-
-      console.log("🗑️ Reservas movidas e removidas com sucesso.");
-    }
-
-    // 🧍‍♂️ Desativa o usuário
-    await prisma.user.update({
-      where: { login },
-      data: { active: false },
-    });
-
-    console.log("✅ Usuário removido:", login);
-    res.json({ success: true, login });
-  } catch (err) {
-    console.error("❌ Erro ao remover usuário:", err);
-    res.status(500).json({ error: "Erro interno ao remover usuário" });
+    return res
+      .status(500)
+      .json({ error: "Erro interno no servidor" })
   }
 }
+
+
+// export async function removeUser(req: Request, res: Response) { //verificado
+//   try {
+//     console.log("Removendo usuário:", req.body);
+
+//     // 🔒 Validação segura
+//     const schema = z.object({
+//       login: z.string().min(1, "Login é obrigatório"),
+//       force: z.boolean().optional(),
+//     });
+
+//     const parsed = schema.safeParse(req.body);
+
+//     if (!parsed.success) {
+//       return res
+//         .status(400)
+//         .json({ error: parsed.error.errors[0].message });
+//     }
+
+//     const { login, force } = parsed.data;
+
+//     // 🔎 Busca usuário
+//     const user = await prisma.user.findUnique({ where: { login } });
+//     if (!user) {
+//       console.warn("⚠️ Usuário não encontrado:", login);
+//       return res.status(404).json({ error: "Usuário não encontrado" });
+//     }
+
+//     // 🔍 Verifica reservas ativas
+//     const reservasAtivas = await prisma.roomPeriod.findMany({
+//       where: { userId: user.id, end: { gte: new Date() } },
+//       include: { room: true },
+//     });
+
+//     // ❗ Se tiver reservas e não for "force", retorna aviso
+//     if (reservasAtivas.length > 0 && !force) {
+//       return res.status(400).json({
+//         error:
+//           "Usuário possui reservas ativas. Use 'force: true' para cancelar e remover.",
+//       });
+//     }
+
+//     // ⚙️ Se for force, arquiva reservas antes de apagar
+//     if (reservasAtivas.length > 0 && force) {
+//       console.log(`⚠️ Cancelando ${reservasAtivas.length} reservas do usuário...`);
+
+//       const templates = reservasAtivas.map((r) => {
+//         const durationInMinutes =
+//           (r.end.getTime() - r.start.getTime()) / (1000 * 60);
+
+//         return {
+//           userId: r.userId,
+//           nome: r.nome,
+//           durationInMinutes,
+//           roomIdAmbiente: r.room?.ID_Ambiente ?? "Desconhecido",
+//           roomBloco: r.room?.bloco ?? "Desconhecido",
+//           originalStart: r.start,
+//           originalEnd: r.end,
+//           reason: "Cancelado por remoção de usuário",
+//         };
+//       });
+
+//       // 🔄 Usa transação para garantir consistência
+//       await prisma.$transaction([
+//         prisma.roomScheduleTemplate.createMany({ data: templates }),
+//         prisma.roomPeriod.deleteMany({ where: { userId: user.id } }),
+//       ]);
+
+//       console.log("🗑️ Reservas movidas e removidas com sucesso.");
+//     }
+
+//     // 🧍‍♂️ Desativa o usuário
+//     await prisma.user.update({
+//       where: { login },
+//       data: { active: false },
+//     });
+
+//     console.log("✅ Usuário removido:", login);
+//     res.json({ success: true, login });
+//   } catch (err) {
+//     console.error("❌ Erro ao remover usuário:", err);
+//     res.status(500).json({ error: "Erro interno ao remover usuário" });
+//   }
+// }
 
 const publicUserSelect = {
   id: true,
   login: true,
+  senha: false,
   nome: true,
   hierarquia: true,
   especialidadeId: true,
@@ -321,10 +391,53 @@ const publicUserSelect = {
   descricao: true,
 };
 
+export async function searchUsers(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      query: z.string().min(1),
+    })
+
+    const { query } = schema.parse(req.query)
+
+    const users = await prisma.user.findMany({
+      where: {
+        active: true,
+        hierarquia: { not: "admin" },
+        OR: [
+          { nome: { contains: query, mode: "insensitive" } },
+          { login: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        nome: true,
+        login: true,
+        especialidade: {
+          select: { nome: true },
+        },
+      },
+      orderBy: { nome: "asc" },
+      take: 5, 
+    })
+
+    return res.json(
+      users.map((u) => ({
+        id: u.id,
+        nome: u.nome ?? u.login,
+        login: u.login,
+        especialidade: u.especialidade?.nome ?? "—",
+      }))
+    )
+  } catch (err) {
+    console.error("Erro ao buscar usuários:", err)
+    return res.status(500).json({
+      error: "Erro interno ao buscar usuários",
+    })
+  }
+}
+
 export async function getUsers(req: Request, res: Response) {// verificado {falta pages}
   try {
-    console.log("📋 Buscando lista de usuários...");
-
     const users = await prisma.user.findMany({
       where: { hierarquia: { not: "admin" } },
       select: { ...publicUserSelect },
@@ -343,7 +456,12 @@ export async function getMyProfile(req: Request, res: Response) {
     const { login } = (req as any).user;
     console.log("Buscando perfil do usuário:", login);
 
-    const user = await prisma.user.findUnique({where:{login}});
+    const user = await prisma.user.findUnique(
+      { where:{login},
+        include: {especialidade: {
+        select: { nome: true },
+      },}
+    });
 
     if (!user) {
       console.warn("Usuário não encontrado:", login);
@@ -354,8 +472,12 @@ export async function getMyProfile(req: Request, res: Response) {
       login: user.login,
       nome: user.nome,
       email: user.email,
-      especialidade: user.especialidadeId,
-      lastLogin_at: user.lastLogin_at
+      telefone: user.telefone,
+      descricao: user.descricao,
+      hierarquia: user.hierarquia,
+      especialidade: {nome: user.especialidade?.nome ?? "—"},
+      lastLogin_at: user.lastLogin_at,
+      active: user.active,
     });
   } catch (err) {
     console.error("Erro ao buscar perfil do usuário:", err);
@@ -366,60 +488,98 @@ export async function getMyProfile(req: Request, res: Response) {
 export async function updateProfile(req: Request, res: Response) {
   try {
     const { login } = (req as any).user;
-    const { nome, email, password, newPassword } = req.body;
+    const {
+      nome,
+      email,
+      telefone,
+      descricao,
+      newPassword,   
+    } = req.body;
 
     console.log("Tentando atualizar perfil de:", login);
 
-    // 1. Buscar o usuário atual para garantir que existe e pegar dados atuais
     const user = await prisma.user.findUnique({
-      where: { login }
+      where: { login },
     });
 
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado." });
     }
 
-    // Objeto que vai guardar apenas o que vamos atualizar
     const dataToUpdate: any = {};
 
-    // --- LÓGICA DO NOME (Opcional) ---
-    if (nome && nome !== user.nome) {
-      dataToUpdate.nome = nome;
-    }
+    /* ===============================
+      NOME
+    ================================ */
+    if( !newPassword ) {
+      if (nome !== undefined && nome !== user.nome) {
+        dataToUpdate.nome = nome; // pode ser ""
+      }
+      console.log("Nome atualizado para:", nome);
+      /* ===============================
+        EMAIL
+      ================================ */
+      if (email !== undefined && email !== user.email) {
+        if (email !== "") {
+          const emailExists = await prisma.user.findFirst({
+            where: {
+              email,
+              NOT: { login },
+            },
+          });
 
-    // --- LÓGICA DO EMAIL ---
-    if (email && email !== user.email) {
-      // Verificar se o email já está em uso por OUTRA pessoa
-      const emailExists = await prisma.user.findUnique({
-        where: { email }
-      });
+          if (emailExists) {
+            return res.status(400).json({
+              error: "Este e-mail já está em uso.",
+            });
+          }
+        }
 
-      if (emailExists) {
-        return res.status(400).json({ error: "Este e-mail já está em uso." });
+        dataToUpdate.email = email; // pode ser ""
+      }
+      /* ===============================
+        TELEFONE
+      =============================== */
+      if (telefone !== undefined && telefone !== user.telefone) {
+        dataToUpdate.telefone = telefone;
       }
 
-      dataToUpdate.email = email;
-    }
-
-    // --- LÓGICA DA SENHA ---
-    // Aqui assumo que o front manda 'newPassword' quando quer trocar.
-    if (newPassword) {
-      // (Opcional) Segurança extra: Verificar se a 'password' atual bate
-      if (!password || !await bcrypt.compare(password, user.senha)) {
-         return res.status(401).json({ error: "Senha atual incorreta." });
+      /* ===============================
+        DESCRIÇÃO
+      =============================== */
+      if (descricao !== undefined && descricao !== user.descricao) {
+        dataToUpdate.descricao = descricao;
       }
+    } else {
+          /* ===============================
+            SENHA
+          =============================== */
+          if (newPassword) {
+            if (newPassword.length < 6) {
+              return res.status(400).json({
+                error: "A nova senha deve ter pelo menos 6 caracteres.",
+              });
+            }
 
-      // Criptografa a nova senha antes de salvar
-      const hashedPassword = await bcrypt.hash(newPassword, 10);
-      dataToUpdate.password = hashedPassword;
+
+            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            dataToUpdate.senha = hashedPassword; // CORRIGIDO AQUI
+          }
     }
 
-    // Se não tiver nada para atualizar, retorna erro ou ok direto
+
+    /* ===============================
+       NADA PARA ATUALIZAR
+    =============================== */
     if (Object.keys(dataToUpdate).length === 0) {
-      return res.status(400).json({ message: "Nenhum dado para atualizar." });
+      return res.status(400).json({
+        message: "Nenhum dado para atualizar.",
+      });
     }
 
-    // 2. Executar a atualização no banco
+    /* ===============================
+       UPDATE
+    =============================== */
     const updatedUser = await prisma.user.update({
       where: { login },
       data: dataToUpdate,
@@ -427,19 +587,15 @@ export async function updateProfile(req: Request, res: Response) {
 
     console.log("Perfil atualizado com sucesso:", login);
 
-    // Retornamos os dados atualizados (sem a senha, claro)
     return res.status(200).json({
-      login: updatedUser.login,
-      nome: updatedUser.nome,
-      email: updatedUser.email,
-      hierarquia: updatedUser.hierarquia,
-      message: "Perfil atualizado com sucesso!"
+      message: "Perfil atualizado com sucesso!",
     });
 
   } catch (err) {
     console.error("Erro ao atualizar perfil:", err);
-    return res.status(500).json({ error: "Erro interno ao atualizar perfil." });
+    return res.status(500).json({
+      error: "Erro interno ao atualizar perfil.",
+    });
   }
 }
-
 // verifica email automatico
