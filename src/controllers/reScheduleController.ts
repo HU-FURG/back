@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { prisma } from "../prisma/client";
 import { z } from "zod";
 
+
 // Função de Listagem (já estava pronta, mantida aqui para contexto)
 export async function listReschedule(req: Request, res: Response) {
   const schema = z.object({
@@ -106,16 +107,19 @@ export async function createReschedule(req: Request, res: Response) {
         // Cria o registro OFICIAL na tabela RoomPeriod
         await tx.roomPeriod.create({
           data: {
-            roomId: room.id,
-            userId: template.userId, // Mantém o dono original
-            nome: template.nome,     // Mantém o nome original
+            //roomId: room.id,
+            //userId: template.userId, // Mantém o dono original
+            room: {connect: {id:room.id} },
+            createdBy: {connect: {id:template.userId} },
+            //nome: template.nome,     // Mantém o nome original
             
             start: startDateTime,
             end: endDateTime,
             
             isRecurring: isRecurring || false,
             approved: true, // Como é feito pelo admin, já entra aprovado
-            
+            startSchedule: startDateTime,
+            endSchedule: endDateTime,
             // Opcional: Se quiser linkar que veio de um template, precisaria de um campo na RoomPeriod
           },
         });
