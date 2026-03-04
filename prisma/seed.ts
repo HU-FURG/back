@@ -1,5 +1,5 @@
-import bcrypt from "bcrypt"
-import { prisma } from "./client"
+import bcrypt from "bcrypt";
+import { prisma } from "./client";
 
 export const especialidadesUser: string[] = [
   // Sistema
@@ -46,36 +46,35 @@ export const especialidadesUser: string[] = [
   "cirurgia toracica",
   "geneticista",
   "geriatria",
-  "medico pediatra"
-]
+  "medico pediatra",
+];
 
 export const especialidadeRooms: string[] = [
-    "CID",
-    "Odontologia",
-    "Oftalmologia",
-    "Cirurgia",
-    "Gastroenterologia",
-    "Pneumologia",
-    "Urologia",
-    "Oncologia",
-    "Neurologia",
-    "Clínico",
-    "Otorrino",
-    "Hematologia",
-    "Pediatria",
-    "Ginecologia",
-    "Traumatologia",
-    "Infectologia"
-]
+  "CID",
+  "Odontologia",
+  "Oftalmologia",
+  "Cirurgia",
+  "Gastroenterologia",
+  "Pneumologia",
+  "Urologia",
+  "Oncologia",
+  "Neurologia",
+  "Clínico",
+  "Otorrino",
+  "Hematologia",
+  "Pediatria",
+  "Ginecologia",
+  "Traumatologia",
+  "Infectologia",
+];
 
 function normalize(value: string) {
   return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .trim()
+    .trim();
 }
-
 
 async function seedEspecialidades() {
   for (const nome of especialidadesUser) {
@@ -83,10 +82,10 @@ async function seedEspecialidades() {
       where: { nome },
       update: {},
       create: { nome },
-    })
+    });
   }
 
-  console.log("✅ Especialidades criadas/atualizadas")
+  console.log("✅ Especialidades criadas/atualizadas");
 }
 async function seedEspecialidadesSala() {
   for (const nome of especialidadeRooms) {
@@ -94,54 +93,52 @@ async function seedEspecialidadesSala() {
       where: { nome },
       update: {},
       create: { nome },
-    })
+    });
   }
 
-  console.log("✅ Especialidades de sala criadas")
+  console.log("✅ Especialidades de sala criadas");
 }
 
-
-
 async function seedAdmin() {
-  const hashedPassword = await bcrypt.hash("admin", 10)
+  const hashedPassword = await bcrypt.hash("admin", 10);
 
   const adminEspecialidade = await prisma.especialidadeUser.findUnique({
     where: { nome: "Administrador" },
-  })
+  });
 
   if (!adminEspecialidade) {
-    throw new Error("Especialidade Administrador não encontrada")
+    throw new Error("Especialidade Administrador não encontrada");
   }
 
   await prisma.user.upsert({
     where: { login: "admin" },
     update: {
-      hierarquia: "admin",
+      hierarquia: "boss",
       especialidadeId: adminEspecialidade.id,
     },
     create: {
       login: "admin",
       senha: hashedPassword,
-      hierarquia: "admin",
-      nome: "Conta Administrativa",
+      hierarquia: "boss",
+      nome: "Conta Administrativa principal",
       especialidadeId: adminEspecialidade.id,
     },
-  })
+  });
 
-  console.log("✅ Usuário admin criado/atualizado")
+  console.log("✅ Usuário admin criado/atualizado");
 }
 
 async function main() {
-  await seedEspecialidades()
-  await seedEspecialidadesSala()
-  await seedAdmin()
+  await seedEspecialidades();
+  await seedEspecialidadesSala();
+  await seedAdmin();
 }
 
 main()
   .catch((e) => {
-    console.error(e)
-    process.exit(1)
+    console.error(e);
+    process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect()
-  })
+    await prisma.$disconnect();
+  });

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {  addRoomToMap, confirmRoom, createMap, deleteRoomFromMap, getMap, getMapStatus, getMapSvg, getMaps, getRoomByElement } from "../controllers/mapsController";
+import {  addRoomToMap, confirmRoom, createMap, deleteRoomFromMap, getMap, getMapStatus, getMapStatusEdit, getMapSvg, getMaps, getRoomByElement } from "../controllers/mapsController";
 import { uploadMapSvg } from "../middlewares/upload";
 // Controller
 const router = Router()
@@ -15,6 +15,7 @@ router.get("/:mapId/rooms/by-element/:svgElementId", getRoomByElement)
 router.delete("/:mapId/rooms/:mapRoomId", deleteRoomFromMap)
 // info mapa
 router.get("/:mapId/status", getMapStatus)
+router.get("/:mapId/statusEdit", getMapStatusEdit)
 
 
 // edição

@@ -362,3 +362,34 @@ export async function getMapStatus(req: Request, res: Response) {
     return res.status(500).json({ error: "Erro ao buscar status do mapa" })
   }
 }
+
+
+
+export async function getMapStatusEdit(req: Request, res: Response) {
+  const { mapId } = req.params
+
+  try {
+    const mapRooms = await prisma.mapRoom.findMany({
+      where: {
+        mapId: Number(mapId)
+      },
+      include: {
+        room: true
+        }
+    })
+
+    const response = mapRooms.map((mr) => {
+      return {
+        svgElementId: mr.svgElementId,
+        roomId: mr.room.id,
+        roomName: mr.room.ID_Ambiente,
+      }
+    })
+
+    return res.json(response)
+
+  } catch (error) {
+    console.error(error)
+    return res.status(500).json({ error: "Erro ao buscar status do mapa" })
+  }
+}

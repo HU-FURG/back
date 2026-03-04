@@ -1,6 +1,6 @@
-import { Request, Response } from 'express';
-import { prisma } from '../prisma/client';
-import { z } from 'zod';
+import { Request, Response } from "express";
+import { prisma } from "../prisma/client";
+import { z } from "zod";
 
 // --- Schemas de Validação ---
 const DashboardQuerySchema = z.object({
@@ -18,7 +18,7 @@ const IndividualRoomQuerySchema = z.object({
 
 const PeriodoSchema = z.object({
   inicio: z.string(), // "2025-08-01"
-  fim: z.string()     // "2025-08-07"
+  fim: z.string(), // "2025-08-07"
 });
 
 const IndividualUserQuerySchema = z.object({
@@ -28,7 +28,6 @@ const IndividualUserQuerySchema = z.object({
 });
 
 export class DashboardController {
-
   // ========================================================
   // MÉTODOS LEGADO (Restaurados para Home.tsx)
   // ========================================================
@@ -40,11 +39,11 @@ export class DashboardController {
   async getOccupation(req: Request, res: Response) {
     try {
       const hoje = new Date();
-      hoje.setHours(0,0,0,0);
-      
+      hoje.setHours(0, 0, 0, 0);
+
       const dataFim = new Date(hoje);
       dataFim.setDate(hoje.getDate() + 6);
-      dataFim.setHours(23,59,59,999);
+      dataFim.setHours(23, 59, 59, 999);
 
       // 1. Total de salas ativas
       const salasAtivas = await prisma.room.count({ where: { active: true } });
@@ -57,25 +56,27 @@ export class DashboardController {
           start: { lte: dataFim },
           end: { gte: hoje },
         },
-        select: { start: true, end: true, roomId: true }
+        select: { start: true, end: true, roomId: true },
       });
 
       // 3. Processa ocupação dia a dia
       const resultado = [];
-      const diasDaSemana = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+      const diasDaSemana = ["Dom", "Seg", "Ter", "Quar", "Quin", "Sext", "Sáb"];
 
       for (let i = 0; i < 7; i++) {
         const diaAtual = new Date(hoje);
         diaAtual.setDate(hoje.getDate() + i);
-        
+
         // Define limites do dia atual
-        const inicioDia = new Date(diaAtual); inicioDia.setHours(0,0,0,0);
-        const fimDia = new Date(diaAtual); fimDia.setHours(23,59,59,999);
+        const inicioDia = new Date(diaAtual);
+        inicioDia.setHours(0, 0, 0, 0);
+        const fimDia = new Date(diaAtual);
+        fimDia.setHours(23, 59, 59, 999);
 
         // Conta salas distintas ocupadas neste dia
         const salasOcupadasSet = new Set<number>();
-        
-        periodos.forEach(p => {
+
+        periodos.forEach((p) => {
           // Verifica intersecção de datas
           if (p.start <= fimDia && p.end >= inicioDia) {
             salasOcupadasSet.add(p.roomId);
@@ -115,7 +116,7 @@ export class DashboardController {
       // Tenta fazer o parse. Se falhar, vai pro catch.
       const { inicio, fim } = PeriodoSchema.parse(req.body);
 
-      // TRUQUE: Adiciona "T12:00:00" para garantir que a data seja criada 
+      // TRUQUE: Adiciona "T12:00:00" para garantir que a data seja criada
       // no meio do dia correto, evitando o bug de voltar 1 dia pelo fuso horário.
       const dataInicio = new Date(inicio + "T12:00:00");
       const dataFim = new Date(fim + "T12:00:00");
@@ -129,11 +130,13 @@ export class DashboardController {
       console.log("Datas processadas:", { dataInicio, dataFim });
 
       if (isNaN(dataInicio.getTime()) || isNaN(dataFim.getTime())) {
-         return res.status(400).json({ message: "Datas inválidas enviadas." });
+        return res.status(400).json({ message: "Datas inválidas enviadas." });
       }
 
       if (dataInicio > dataFim) {
-        return res.status(400).json({ message: "Data inicial maior que final." });
+        return res
+          .status(400)
+          .json({ message: "Data inicial maior que final." });
       }
 
       const salasAtivas = await prisma.room.count({ where: { active: true } });
@@ -143,17 +146,17 @@ export class DashboardController {
         where: {
           room: { active: true }, // <--- Faltava isso para consistência
           start: { lte: dataFim },
-          end: { gte: dataInicio }
+          end: { gte: dataInicio },
         },
-        select: { start: true, end: true, roomId: true }
+        select: { start: true, end: true, roomId: true },
       });
 
       if (periodos.length === 0) {
-        return res.json({ 
-          message: "Nenhum agendamento no período.", 
-          tempoMedio: "0min", 
-          salasUsadas: 0, 
-          totalSalas: salasAtivas 
+        return res.json({
+          message: "Nenhum agendamento no período.",
+          tempoMedio: "0min",
+          salasUsadas: 0,
+          totalSalas: salasAtivas,
         });
       }
 
@@ -163,37 +166,40 @@ export class DashboardController {
         const dEnd = new Date(p.end);
         const dStart = new Date(p.start);
         const diffMs = dEnd.getTime() - dStart.getTime();
-        return acc + (diffMs / (1000 * 60));
+        return acc + diffMs / (1000 * 60);
       }, 0);
 
       const mediaMinutos = minutosTotais / periodos.length;
-      
+
       // Set distinct para contar salas únicas
-      const salasUsadas = new Set(periodos.map(p => p.roomId)).size;
+      const salasUsadas = new Set(periodos.map((p) => p.roomId)).size;
 
       // Formatação
       const horas = Math.floor(mediaMinutos / 60);
       const mins = Math.round(mediaMinutos % 60);
       let tempoFormatado = `${mins}min`;
-      if (horas > 0) tempoFormatado = `${horas}h${mins > 0 ? `:${mins}` : ''}`;
+      if (horas > 0) tempoFormatado = `${horas}h${mins > 0 ? `:${mins}` : ""}`;
 
       return res.json({
         salasUsadas,
         totalSalas: salasAtivas,
         tempoMedio: tempoFormatado,
-        periodoAnalisado: { inicio: dataInicio, fim: dataFim }
+        periodoAnalisado: { inicio: dataInicio, fim: dataFim },
       });
-
     } catch (error: any) {
       // 3. Melhoria no retorno do erro para saber se é Zod ou Prisma
       console.error("Erro no calculateAverageTime:", error);
-      
+
       // Se for erro do Zod (validação)
       if (error.issues) {
-        return res.status(400).json({ message: "Dados inválidos.", detalhes: error.issues });
+        return res
+          .status(400)
+          .json({ message: "Dados inválidos.", detalhes: error.issues });
       }
 
-      return res.status(500).json({ message: "Erro interno ao calcular média." });
+      return res
+        .status(500)
+        .json({ message: "Erro interno ao calcular média." });
     }
   }
 
@@ -201,39 +207,39 @@ export class DashboardController {
   // MÉTODOS NOVOS (Dashboard Analytics)
   // ========================================================
 
-async getGeneralStats(req: Request, res: Response) {
+  async getGeneralStats(req: Request, res: Response) {
     try {
       const { block, month, year } = DashboardQuerySchema.parse(req.query);
       const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0); 
+      const endDate = new Date(year, month, 0);
       endDate.setHours(23, 59, 59);
 
       // 1. Busca dados do banco
       const stats = await prisma.roomStats.findMany({
         where: {
           roomBloco: block && block !== "Todos" ? block : undefined,
-          monthRef: { gte: startDate, lte: endDate }
-        }
+          monthRef: { gte: startDate, lte: endDate },
+        },
       });
 
-      // 2. Conta TOTAL DE SALAS ATIVAS 
+      // 2. Conta TOTAL DE SALAS ATIVAS
       const totalRoomsCount = await prisma.room.count({
         where: {
-            bloco: {
-                nome: block && block !== "Todos" ? block : undefined
-            },
-            active: true 
-        }
+          bloco: {
+            nome: block && block !== "Todos" ? block : undefined,
+          },
+          active: true,
+        },
       });
       const safeRoomCount = totalRoomsCount > 0 ? totalRoomsCount : 1;
 
       // 3. Acumula os minutos (Mantém igual)
       let totalUsedMin = 0;
-      const weeklyUsageAccumulator = [0, 0, 0, 0, 0, 0, 0]; 
+      const weeklyUsageAccumulator = [0, 0, 0, 0, 0, 0, 0];
 
-      stats.forEach(s => {
+      stats.forEach((s) => {
         totalUsedMin += s.totalUsedMin;
-        const days = s.usageByWeekday as Record<string, number>; 
+        const days = s.usageByWeekday as Record<string, number>;
         if (days) {
           Object.keys(days).forEach((dayKey) => {
             const idx = parseInt(dayKey);
@@ -245,45 +251,48 @@ async getGeneralStats(req: Request, res: Response) {
       // --- CÁLCULO DE DIAS ÚTEIS ---
       const weekdayCounts = [0, 0, 0, 0, 0, 0, 0];
       let workingDaysCount = 0; // Contador de dias úteis
-      
+
       let currentDate = new Date(startDate);
       while (currentDate <= endDate) {
-          const dayOfWeek = currentDate.getDay(); // 0 (Dom) a 6 (Sáb)
-          weekdayCounts[dayOfWeek]++; 
-          
-          // Se não for Domingo (0) nem Sábado (6), conta como dia útil
-          if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-             workingDaysCount++;
-          }
-          currentDate.setDate(currentDate.getDate() + 1);
+        const dayOfWeek = currentDate.getDay(); // 0 (Dom) a 6 (Sáb)
+        weekdayCounts[dayOfWeek]++;
+
+        // Se não for Domingo (0) nem Sábado (6), conta como dia útil
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+          workingDaysCount++;
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
       }
 
       // --- PIE CHART (Capacidade Total Baseada em DIAS ÚTEIS) ---
-      const HORAS_FUNCIONAMENTO_DIA = 9; 
-      const totalCapacityHours = safeRoomCount * workingDaysCount * HORAS_FUNCIONAMENTO_DIA;
+      const HORAS_FUNCIONAMENTO_DIA = 9;
+      const totalCapacityHours =
+        safeRoomCount * workingDaysCount * HORAS_FUNCIONAMENTO_DIA;
 
       // --- PIE CHART DATA ---
       const totalUsedHours = Math.round(totalUsedMin / 60);
       const idleHours = Math.max(0, totalCapacityHours - totalUsedHours);
 
       const pieChartData = [
-        { name: "Tempo Usado", value: totalUsedHours, color: "#059669" }, 
-        { name: "Tempo Livre", value: idleHours, color: "#e5e7eb" } 
+        { name: "Tempo Usado", value: totalUsedHours, color: "#059669" },
+        { name: "Tempo Livre", value: idleHours, color: "#e5e7eb" },
       ];
 
       // --- BAR CHART DATA ---
       const weekNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-      
-      const barChartData = weeklyUsageAccumulator.map((totalMin, index) => {
-        const countDays = weekdayCounts[index] || 1;
-        const divisor = countDays * safeRoomCount; 
-        const averageMin = totalMin / divisor;
-        
-        return {
-          day: weekNames[index],
-          used: Number((averageMin / 60).toFixed(1)), // Retorna número com 1 casa decimal
-        };
-      }).filter((_, i) => i !== 0 && i !== 6); 
+
+      const barChartData = weeklyUsageAccumulator
+        .map((totalMin, index) => {
+          const countDays = weekdayCounts[index] || 1;
+          const divisor = countDays * safeRoomCount;
+          const averageMin = totalMin / divisor;
+
+          return {
+            day: weekNames[index],
+            used: Number((averageMin / 60).toFixed(1)), // Retorna número com 1 casa decimal
+          };
+        })
+        .filter((_, i) => i !== 0 && i !== 6);
 
       // --- CÁLCULO DO OCCUPANCY RATE ---
       // Evita divisão por zero
@@ -293,9 +302,9 @@ async getGeneralStats(req: Request, res: Response) {
       }
 
       const summary = {
-          totalBookings: stats.reduce((acc, curr) => acc + curr.totalBookings, 0),
-          totalCanceled: stats.reduce((acc, curr) => acc + curr.totalCanceled, 0),
-          occupancyRate: occupancyRate // <--- AGORA ESTÁ AQUI
+        totalBookings: stats.reduce((acc, curr) => acc + curr.totalBookings, 0),
+        totalCanceled: stats.reduce((acc, curr) => acc + curr.totalCanceled, 0),
+        occupancyRate: occupancyRate, // <--- AGORA ESTÁ AQUI
       };
 
       return res.json({ pieChartData, barChartData, summary });
@@ -303,8 +312,7 @@ async getGeneralStats(req: Request, res: Response) {
       console.error(error);
       return res.status(400).json({ error: "Erro ao buscar dados gerais." });
     }
-}
-
+  }
 
   // async getIndividualUserStats(req: Request, res: Response) {
   //   try {
@@ -318,7 +326,7 @@ async getGeneralStats(req: Request, res: Response) {
   //               date: { gte: startDate, lte: endDate },
   //               attendedUsersList: {
   //                   path: ['$'], // <--- CORREÇÃO DO ARRAY DE STRINGS PARA O PRISMA
-  //                   array_contains: [{ userId: userId }] 
+  //                   array_contains: [{ userId: userId }]
   //               }
   //           },
   //           orderBy: { date: 'asc' }
@@ -335,7 +343,7 @@ async getGeneralStats(req: Request, res: Response) {
   //           }
   //           return acc;
   //       }, []);
-        
+
   //       // 2. Salas Mais Usadas
   //       const roomCountMap = new Map<string, number>();
   //       reports.forEach(rep => {
@@ -350,7 +358,7 @@ async getGeneralStats(req: Request, res: Response) {
   //       // 3. Totais e Turno
   //       const totalReservas = reports.length;
   //       let turnos = { "Manhã": 0, "Tarde": 0 };
-        
+
   //       reports.forEach(rep => {
   //            const users = rep.attendedUsersList as any[];
   //            const userEntry = users.find(u => u.userId === userId);
@@ -449,7 +457,7 @@ async getGeneralStats(req: Request, res: Response) {
   //               if (!userMap.has(u.userId)) {
   //                   userMap.set(u.userId, {
   //                       id: u.userId,
-  //                       nomeJson: u.nome || "Usuário", 
+  //                       nomeJson: u.nome || "Usuário",
   //                       totalReservas: 0,
   //                       roomsCount: {} as Record<string, number>,
   //                       shifts: { "Manhã": 0, "Tarde": 0 }
@@ -493,8 +501,8 @@ async getGeneralStats(req: Request, res: Response) {
 
   //     if (search) {
   //       const lowerSearch = search.toLowerCase();
-  //       usersList = usersList.filter(u => 
-  //           (u.nome && u.nome.toLowerCase().includes(lowerSearch)) || 
+  //       usersList = usersList.filter(u =>
+  //           (u.nome && u.nome.toLowerCase().includes(lowerSearch)) ||
   //           (u.login && u.login.toLowerCase().includes(lowerSearch))
   //       );
   //     }
@@ -523,7 +531,7 @@ async getGeneralStats(req: Request, res: Response) {
   //       const dailyComparison = dailyReports.map(day => ({
   //           day: new Date(day.date).getDate().toString(),
   //           used: day.totalUsedMinutes ? Math.round(day.totalUsedMinutes / 60) : 0,
-  //           reserved: day.totalUnusedMinutes ? Math.round((day.totalUsedMinutes! + day.totalUnusedMinutes!) / 60) : 0 
+  //           reserved: day.totalUnusedMinutes ? Math.round((day.totalUsedMinutes! + day.totalUnusedMinutes!) / 60) : 0
   //       }));
 
   //       const userMap = new Map();
@@ -556,7 +564,7 @@ async getGeneralStats(req: Request, res: Response) {
   //   }
   // }
 
-async searchUniversal(req: Request, res: Response) {
+  async searchUniversal(req: Request, res: Response) {
     try {
       const termo = String(req.query.termo || "").trim();
       if (!termo) return res.json([]);
@@ -567,45 +575,45 @@ async searchUniversal(req: Request, res: Response) {
             {
               ID_Ambiente: {
                 contains: termo,
-                mode: 'insensitive'
-              }
+                mode: "insensitive",
+              },
             },
             {
               bloco: {
                 nome: {
                   contains: termo,
-                  mode: 'insensitive'
-                }
-              }
-            }
-          ]
+                  mode: "insensitive",
+                },
+              },
+            },
+          ],
         },
         take: 3,
-        select: { ID_Ambiente: true }
+        select: { ID_Ambiente: true },
       });
 
       const users = await prisma.user.findMany({
         where: {
           nome: {
             contains: termo,
-            mode: 'insensitive'
-          }
+            mode: "insensitive",
+          },
         },
         take: 3,
-        select: { nome: true }
+        select: { nome: true },
       });
 
       const results = [
-        ...rooms.map(r => ({
+        ...rooms.map((r) => ({
           label: `Sala: ${r.ID_Ambiente}`,
           value: r.ID_Ambiente,
-          type: 'room'
+          type: "room",
         })),
-        ...users.map(u => ({
+        ...users.map((u) => ({
           label: `Usuário: ${u.nome}`,
           value: u.nome,
-          type: 'user'
-        }))
+          type: "user",
+        })),
       ];
 
       return res.json(results);

@@ -10,6 +10,7 @@ datasource db {
 }
 
 enum Hierarquia {
+  boss
   admin
   user
 }
@@ -65,6 +66,30 @@ model User {
   
   scheduleTemplates     RoomScheduleTemplate[]
   notificationsReceived Notification[]
+
+  roomScheduleTemplates RoomScheduleTemplate[] @relation("ReScheduleCreatedBy")
+  reScheduleTemplates RoomScheduleTemplate[] @relation("ReScheduledFor")
+
+  adminScopes AdminScope[]
+
+  roomPeriodCanceleds RoomPeriodCanceled[] @relation("CanceledByUser")
+
+  roomPeriodCanceledcreateds RoomPeriodCanceled[] @relation("CanceledCreatedBy")
+
+  roomPeriodCanceledsscheduleFor RoomPeriodCanceled[] @relation("CanceledScheduledFor")
+}
+
+// controle de areas do admin comun
+model AdminScope {
+  id       Int @id @default(autoincrement())
+  
+  adminId  Int
+  blocoId  Int
+
+  admin User      @relation(fields: [adminId], references: [id])
+  bloco BlocoRoom @relation(fields: [blocoId], references: [id])
+
+  @@unique([adminId, blocoId])
 }
 
 model EspecialidadeRoom {
@@ -93,6 +118,8 @@ model BlocoRoom {
   rooms Room[]
 
   maps Map[]
+
+  adminScopes AdminScope[]
 }
 
 
@@ -184,8 +211,11 @@ model RoomPeriod {
 // Este modelo armazena agendamentos que podem ser re-agendados. Um agendamento é movido para cá quando vence ou é cancelado.
 model RoomScheduleTemplate {
   id                Int      @id @default(autoincrement())
-  userId            Int?
-  nome              String
+
+  // controle de quem crio e para quem foi agendado
+  createdById Int
+  scheduledForId Int?
+
   durationInMinutes Int
 
   // Detalhes da Sala (para caso a sala seja excluída)
@@ -199,7 +229,55 @@ model RoomScheduleTemplate {
   reason            String  // Motivo da template (e.g., "Vencido", "Cancelado")
   archivedAt        DateTime @default(now())
 
-  user User? @relation(fields: [userId], references: [id])
+  createdBy   User @relation("ReScheduleCreatedBy", fields: [createdById], references: [id])
+  scheduledFor   User? @relation("ReScheduledFor", fields: [scheduledForId], references: [id])
+
+  users User[]
+}
+
+// Sistema pra cancelamento 
+model RoomPeriodCanceled {
+  id Int @id @default(autoincrement())
+
+  // =========================
+  // RELAÇÃO COM SALA
+  // =========================
+  roomIdAmbiente String
+  roomBloco String
+
+  // =========================
+  // RELAÇÃO USUÁRIOS
+  // =========================
+  createdById Int?
+  createdBy   User? @relation("CanceledCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  scheduledForId Int?
+  scheduledFor   User? @relation("CanceledScheduledFor", fields: [scheduledForId], references: [id], onDelete: SetNull)
+
+  canceledById Int?
+  canceledBy   User? @relation("CanceledByUser", fields: [canceledById], references: [id], onDelete: SetNull)
+
+  // =========================
+  // PERÍODO ORIGINAL
+  // =========================
+  start DateTime
+  end   DateTime
+  weekday Int?
+
+  // =========================
+  // CANCELAMENTO
+  // =========================
+  cancelReason String
+
+  canceledAt DateTime @default(now())
+
+  // =========================
+  // ÍNDICES
+  // =========================
+  @@index([createdById])
+  @@index([scheduledForId])
+  @@index([canceledById])
+  @@index([canceledAt])
 }
 
 // --- Histórico para Análises Individuais ---
@@ -345,7 +423,6 @@ model Notification {
 
   user User @relation(fields: [userId], references: [id])
 }
-
 
 // Mapas
 
