@@ -55,6 +55,7 @@ model User {
   especialidadeId Int?
   lastLogin_at    DateTime?
 
+  updatedAt       DateTime @updatedAt @default(now())
   createdAt       DateTime  @default(now())
   active          Boolean   @default(true)
 
@@ -110,7 +111,6 @@ model EspecialidadeUser {
   roomsAceitas EspecialidadeRoom[] @relation("RoomAceitas")
 }
 
-
 model BlocoRoom {
   id    Int    @id @default(autoincrement())
   nome  String @unique
@@ -121,7 +121,6 @@ model BlocoRoom {
 
   adminScopes AdminScope[]
 }
-
 
 model Room {
   id              Int      @id @default(autoincrement())
@@ -145,27 +144,6 @@ model Room {
 
   mapRooms MapRoom[]
 }
-
-model PcUsageEvent {
-  id Int @id @default(autoincrement())
-
-  // =========================
-  // ORIGEM
-  // =========================
-  roomIdAmbiente String      // "x"
-  eventType      PcEventType // iniciou | usou | encerrou
-  targetApp      String?     // chrome.exe
-
-  // =========================
-  // TEMPO
-  // =========================
-  eventTime DateTime
-
-  createdAt  DateTime @default(now())
-
-  @@index([roomIdAmbiente, eventTime])
-}
-
 
 model RoomPeriod {
   id          Int      @id @default(autoincrement())
@@ -280,10 +258,32 @@ model RoomPeriodCanceled {
   @@index([canceledAt])
 }
 
+// controle final do dia pra verificação de uso
+model PcUsageEvent {
+  id Int @id @default(autoincrement())
+
+  // =========================
+  // ORIGEM
+  // =========================
+  roomIdAmbiente String      // "x"
+  eventType      PcEventType // iniciou | usou | encerrou
+  targetApp      String?     // chrome.exe
+
+  // =========================
+  // TEMPO
+  // =========================
+  eventTime DateTime
+
+  createdAt  DateTime @default(now())
+
+  @@index([roomIdAmbiente, eventTime])
+}
+
 // --- Histórico para Análises Individuais ---
 model PeriodHistory {
   id Int @id @default(autoincrement())
-
+  
+  idPeriod       Int     
   // =========================
   // SNAPSHOT DA SALA
   // =========================
@@ -317,6 +317,12 @@ model PeriodHistory {
   endService   DateTime?
 
   // =========================
+  // Avaliação da sala
+  // =========================
+  availabilityStatus availabilityStatus? @default(ok)
+  typeSchedule typeSchedule?
+
+  // =========================
   // MÉTRICAS
   // =========================
   durationMinutes       Int?
@@ -330,84 +336,21 @@ model PeriodHistory {
   @@index([roomIdAmbiente, start])
 }
 
-
 // Esta tabela deve ser preenchida por um Cron Job no final do dia (ex: 23:59)
 model PeriodReportDaily {
   id             Int      @id @default(autoincrement())
-  
-  idPeriod       Int     // para referência cruzada entre reservadas do mesmo periodo agendado
 
-  // controle de quem crio e para quem foi agendado
-  createdById Int
-  scheduledForId Int
-  // horario q foi agendado
-  start       DateTime //foco na hora
-  end         DateTime //foco na hora
-  // tempo usado pela pessoa que agendou (diferença entre startService e endService)
-  totalUsedMinutes   Int?   
+  dayWeek Int
+  ScheduleDay DateTime
 
-   // avaliçao da reserva
-  availabilityStatus availabilityStatus? @default(ok)
-  // pra que proposito
-  typeSchedule typeSchedule?
-
-  // pegar referencia em pcusedreference ligar ambos para fim de saber se usou
-  used  Boolean? @default(true)
-  // relacionar com historico de sala no dia
-  roomDailyId Int
-
-  roomDaily   roomTimeUsedDaily @relation("roomDailyforId", fields: [roomDailyId], references: [id])
-  @@unique([idPeriod, roomDailyId])
-}
-
-// tempo usado na sala
-model roomTimeUsedDaily {
-  id             Int      @id @default(autoincrement())
-  
-  // Data de referência do relatório (ex: 2023-10-25T00:00:00.000Z)
-  date           DateTime 
-  generatedAt    DateTime @default(now())
-  weekday       Int      // dia da semana (0-6)
-
-  // Identificação da sala (Snapshot - string para manter histórico mesmo se Room for deletada)
   roomIdAmbiente String
   roomBloco      String
 
-  totalUsedMinutes   Int   
+  SalaAtiva Boolean
 
-  @@index([date])
-  @@index([roomIdAmbiente, date])
-  periodReportDailies PeriodReportDaily[] @relation("roomDailyforId")
-}
+  totalScheduleMinutes Int?
+  totalUsedMinutes   Int?   
 
-// guarda informações gerais de uso diario das salas pelo mês
-model RoomStats {
-  id               Int       @id @default(autoincrement())
-  //  Identificação da sala
-  roomIdAmbiente   String
-  roomBloco        String
-
-  //  Período de referência (mês consolidado)
-  monthRef         DateTime  // Ex: 2025-10-01 (representa o mês)
-
-  //  Dados agregados gerais
-  totalReservedMin Int       // soma do tempo reservado no mês
-  totalUsedMin     Int       // soma do tempo realmente usado
-  avgIdleMin       Float?    // média de tempo ocioso entre reservas
-  avgUsageRate     Float?    // média (totalUsed / totalReserved)
-
-  //  Distribuição por dia da semana (0-5)
-  usageByWeekday   Json?     // exemplo: { "0": 300, "1": 700, ..., "6": 120 }
-
-  //  Contagem de eventos
-  totalBookings    Int       // total de agendamentos no mês
-  totalUsed        Int       // quantos foram usados (used = true)
-  totalCanceled    Int       // quantos não foram usados (used = false)
-
-  // Timestamps
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
-  @@index([roomIdAmbiente, monthRef])
 }
 
 // --- Novo Sistema de Notificação ---

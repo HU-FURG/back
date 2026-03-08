@@ -20,27 +20,51 @@ const agendaSchema = z.object({
 //  confirma busca em page Schedule/reservas
 export async function searchUsersAndRooms(req: Request, res: Response) {
   try {
+    const { userId, hierarquia } = (req as any).user;
+
     const schema = z.object({
       search: z.string().min(1),
     });
 
     const { search } = schema.parse(req.query);
 
-    // 1. Busca de Salas
+    // ======================================================
+    // 🔐 BLOCO PERMITIDO PARA ADMIN
+    // ======================================================
+    let allowedBlocks: number[] | undefined = undefined;
+
+    if (hierarquia === "admin") {
+      const scopes = await prisma.adminScope.findMany({
+        where: { adminId: userId },
+        select: { blocoId: true },
+      });
+
+      allowedBlocks = scopes.map((s) => s.blocoId);
+    }
+
+    // ======================================================
+    // 🔎 BUSCA DE SALAS
+    // ======================================================
     const rooms = await prisma.room.findMany({
       where: {
         active: true,
         ID_Ambiente: { contains: search, mode: "insensitive" },
+
+        ...(allowedBlocks && {
+          blocoId: { in: allowedBlocks },
+        }),
       },
       select: {
         id: true,
         ID_Ambiente: true,
         bloco: { select: { nome: true } },
       },
-      take: 5, // Limite para não sobrecarregar
+      take: 5,
     });
 
-    // 2. Busca de Usuários
+    // ======================================================
+    // 👤 BUSCA DE USUÁRIOS
+    // ======================================================
     const users = await prisma.user.findMany({
       where: {
         active: true,
@@ -59,18 +83,22 @@ export async function searchUsersAndRooms(req: Request, res: Response) {
       take: 5,
     });
 
+    // ======================================================
+    // 📦 FORMATAÇÃO FINAL
+    // ======================================================
     const results = [
       ...users.map((u) => ({
         id: u.id,
         title: u.nome,
         subtitle: u.especialidade?.nome ?? "—",
-        type: "user", // Identificador para o frontend
+        type: "user",
       })),
+
       ...rooms.map((r) => ({
-        id: r.id, // Salas geralmente usam o ID_Ambiente como chave
+        id: r.id,
         title: r.ID_Ambiente,
         subtitle: r.bloco?.nome ?? "Sem Bloco",
-        type: "room", // Identificador para o frontend
+        type: "room",
       })),
     ];
 
@@ -79,6 +107,7 @@ export async function searchUsersAndRooms(req: Request, res: Response) {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: "Query de busca inválida" });
     }
+
     console.error("Erro ao buscar dados:", err);
     return res.status(500).json({ error: "Erro interno ao processar busca" });
   }
@@ -87,6 +116,7 @@ export async function searchUsersAndRooms(req: Request, res: Response) {
 // Listar agendamentos futuros com filtros
 export async function listScheduling(req: Request, res: Response) {
   const { userId, hierarquia } = (req as any).user;
+
   const schema = z.object({
     page: z.string().optional(),
     bloco: z.coerce.number().optional(),
@@ -95,6 +125,7 @@ export async function listScheduling(req: Request, res: Response) {
     tipo: z.string().optional(),
     date: z.string().optional(),
   });
+
   const { page, bloco, search, searchtipo, tipo, date } = schema.parse(
     req.query,
   );
@@ -103,94 +134,101 @@ export async function listScheduling(req: Request, res: Response) {
   const currentPage = parseInt(page || "1", 10);
   const skip = (currentPage - 1) * pageSize;
 
-  let where: any = {};
+  const filters: any[] = [];
 
   // ==========================================================
-  // CASO A: BUSCA ESPECÍFICA (Ignora data/bloco/tipo)
+  // 🔎 FILTRO DE BUSCA (SALA OU USUÁRIO)
   // ==========================================================
   if (search) {
     if (searchtipo === "user") {
-      where = {
-        OR: [{ scheduledForId: parseInt(search) }],
-      };
+      filters.push({ scheduledForId: Number(search) });
     } else if (searchtipo === "room") {
-      where = {
-        OR: [{ roomId: parseInt(search) }],
-      };
+      filters.push({ roomId: Number(search) });
     } else {
-      // Fallback genérico
-      where = {
+      filters.push({
         OR: [
           {
-            scheduledFor: { nome: { contains: search, mode: "insensitive" } },
+            scheduledFor: {
+              nome: { contains: search, mode: "insensitive" },
+            },
           },
           {
-            room: { ID_Ambiente: { contains: search, mode: "insensitive" } },
+            room: {
+              ID_Ambiente: { contains: search, mode: "insensitive" },
+            },
           },
         ],
-      };
+      });
     }
   }
+
   // ==========================================================
-  // CASO B: FILTROS NORMAIS (Data, Bloco, Tipo)
+  // 📅 FILTRO DE DATA
   // ==========================================================
-  else {
+  if (date) {
     const TZ = "America/Sao_Paulo";
-    const base = date
-      ? DateTime.fromISO(date, { zone: TZ })
-      : DateTime.now().setZone(TZ);
+    const base = DateTime.fromISO(date, { zone: TZ });
 
     const startOfDay = base.startOf("day").toJSDate();
     const endOfDay = base.endOf("day").toJSDate();
 
-    where = {
-      AND: [
+    filters.push({
+      OR: [
         {
-          OR: [
-            // 🔹 Não recorrente
-            {
-              isRecurring: false,
-              start: { gte: startOfDay, lte: endOfDay },
-            },
-
-            // 🔹 Recorrente
-            {
-              isRecurring: true,
-              weekday: base.weekday,
-              startSchedule: { lte: endOfDay },
-              endSchedule: { gte: startOfDay },
-            },
-          ],
-        },
-
-        {
-          room: {
-            ...(tipo && tipo !== "all" && { tipo }),
-            ...(bloco && { blocoId: bloco }),
+          isRecurring: false,
+          start: {
+            gte: startOfDay,
+            lte: endOfDay,
           },
         },
-      ],
-    };
-  }
-  if (hierarquia !== "boss") {
-    where = {
-      AND: [
-        where,
         {
-          createdById: userId,
+          isRecurring: true,
+          weekday: base.weekday,
+          startSchedule: { lte: endOfDay },
+          endSchedule: { gte: startOfDay },
         },
       ],
-    };
+    });
   }
 
-  // QUERY ÚNICA COM TRANSACTION
+  // ==========================================================
+  // 🏢 FILTROS DE SALA
+  // ==========================================================
+  if (tipo && tipo !== "all") {
+    filters.push({
+      room: { tipo },
+    });
+  }
+
+  if (bloco) {
+    filters.push({
+      room: { blocoId: bloco },
+    });
+  }
+
+  // ==========================================================
+  // 🔐 PERMISSÃO ADMIN
+  // ==========================================================
+  if (hierarquia === "admin") {
+    filters.push({
+      createdById: userId,
+    });
+  }
+
+  const where = filters.length ? { AND: filters } : {};
+
+  // ==========================================================
+  // QUERY
+  // ==========================================================
   const [total, agendas] = await prisma.$transaction([
     prisma.roomPeriod.count({ where }),
+
     prisma.roomPeriod.findMany({
       where,
       orderBy: { start: "desc" },
       skip,
       take: pageSize,
+
       select: {
         id: true,
         start: true,

@@ -103,10 +103,41 @@ export async function listRooms(req: Request, res: Response) {
     }
 
     // =========================
-    // ADMIN → VÊ TUDO
+    // BOSS → VÊ TUDO
     // =========================
     if (usuario.hierarquia === "boss") {
       const rooms = await prisma.room.findMany({
+        include: {
+          bloco: true,
+          especialidade: true,
+        },
+      });
+
+      return res.status(200).json({ data: rooms });
+    }
+
+    // =========================
+    // ADMIN → FILTRA POR BLOCOS
+    // =========================
+    if (usuario.hierarquia === "admin") {
+      const blocosPermitidos = await prisma.adminScope.findMany({
+        where: {
+          adminId: usuario.id,
+        },
+        select: {
+          blocoId: true,
+        },
+      });
+
+      const blocosIds = blocosPermitidos.map((b) => b.blocoId);
+
+      const rooms = await prisma.room.findMany({
+        where: {
+          active: true,
+          blocoId: {
+            in: blocosIds,
+          },
+        },
         include: {
           bloco: true,
           especialidade: true,
@@ -125,7 +156,7 @@ export async function listRooms(req: Request, res: Response) {
         bloco: true,
         especialidade: {
           include: {
-            especialidadesAceitas: true, // 🔥 relação correta
+            especialidadesAceitas: true,
           },
         },
       },
@@ -134,22 +165,18 @@ export async function listRooms(req: Request, res: Response) {
     const especialidadeUserId = usuario.especialidadeId;
 
     const salasFiltradas = rooms.filter((room) => {
-      // Sala diferenciada sempre liberada
       if (room.tipo.toLowerCase() === "diferenciado") {
         return true;
       }
 
-      // Sala sem especialidade definida → bloqueia
       if (!room.especialidade) {
         return false;
       }
 
-      // Sem especialidade no usuário → não pode
       if (!especialidadeUserId) {
         return false;
       }
 
-      // Verifica relação MANY-TO-MANY corretamente
       return room.especialidade.especialidadesAceitas.some(
         (esp) => esp.id === especialidadeUserId,
       );
@@ -161,7 +188,6 @@ export async function listRooms(req: Request, res: Response) {
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 }
-
 // ✅ Editar sala
 export async function editRoom(req: Request, res: Response) {
   const schema = z.object({
@@ -436,14 +462,45 @@ export async function getRoomSchedule(req: Request, res: Response) {
   }
 
   try {
-    // 🔐 Regra de visibilidade
-    const where = {
-      roomId: roomIdNumber,
-      ...(hierarquia !== "boss" && { createdById: userId }),
-    };
+    // 🔎 busca a sala
+    const room = await prisma.room.findUnique({
+      where: { id: roomIdNumber },
+      select: {
+        id: true,
+        blocoId: true,
+      },
+    });
 
+    if (!room) {
+      return res.status(404).json({
+        error: { code: "ROOM_NOT_FOUND", message: "Sala não encontrada." },
+      });
+    }
+
+    // 🔐 ADMIN → só pode acessar blocos permitidos
+    if (hierarquia === "admin") {
+      const allowed = await prisma.adminScope.findFirst({
+        where: {
+          adminId: userId,
+          blocoId: room.blocoId,
+        },
+      });
+
+      if (!allowed) {
+        return res.status(403).json({
+          error: {
+            code: "FORBIDDEN",
+            message: "Você não tem acesso a este bloco.",
+          },
+        });
+      }
+    }
+
+    // 🔎 busca reservas
     const reservations = await prisma.roomPeriod.findMany({
-      where,
+      where: {
+        roomId: roomIdNumber,
+      },
       include: {
         room: {
           select: {
@@ -500,7 +557,7 @@ export async function getRoomSchedule(req: Request, res: Response) {
 
 // ✅ Obter agenda de um bloco em um dia específico
 export async function getBlockDayGrade(req: Request, res: Response) {
-  const userId = (req as any).user?.userId;
+  const { userId, hierarquia } = (req as any).user || {};
   const { block, date } = req.params;
 
   if (!userId) {
@@ -517,6 +574,22 @@ export async function getBlockDayGrade(req: Request, res: Response) {
   }
 
   try {
+    // 🔐 ADMIN → verifica permissão no bloco
+    if (hierarquia === "admin") {
+      const allowed = await prisma.adminScope.findFirst({
+        where: {
+          adminId: userId,
+          blocoId: blocoId,
+        },
+      });
+
+      if (!allowed) {
+        return res.status(403).json({
+          error: "Você não tem acesso a este bloco.",
+        });
+      }
+    }
+
     const dia = DateTime.fromISO(date, { zone: "America/Sao_Paulo" });
 
     const startOfDay = dia.startOf("day").toJSDate();
@@ -544,14 +617,11 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     // =========================
     // BUSCA CANDIDATA DE RESERVAS
     // =========================
-    const base = dia;
-
     const reservas = await prisma.roomPeriod.findMany({
       where: {
         roomId: { in: roomIds },
 
         OR: [
-          // 🔹 NÃO recorrente → data exata
           {
             isRecurring: false,
             start: {
@@ -559,8 +629,6 @@ export async function getBlockDayGrade(req: Request, res: Response) {
               lte: endOfDay,
             },
           },
-
-          // 🔹 Recorrente → weekday + intervalo válido
           {
             isRecurring: true,
             weekday: dia.weekday,
@@ -628,7 +696,7 @@ export async function getBlockDayGrade(req: Request, res: Response) {
     }
 
     // =========================
-    // MONTA RESPOSTA FINAL
+    // RESPOSTA FINAL
     // =========================
     const salas = rooms.map((room) => ({
       roomId: room.id,

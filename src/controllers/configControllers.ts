@@ -9,28 +9,70 @@ import { archiveCanceledPeriods } from "../auxiliar/cancelSchecule/auxiCancelSch
 //------------------------------------------------
 // Room Filters blocos e especialidades para typagem
 //------------------------------------------------
-export async function getRoomFilters(req: Request, res: Response) {
-  const [blocos, especialidades] = await Promise.all([
-    prisma.blocoRoom.findMany({
-      orderBy: { nome: "asc" },
-      select: {
-        id: true,
-        nome: true,
-      },
-    }),
-    prisma.especialidadeRoom.findMany({
-      orderBy: { nome: "asc" },
-      select: {
-        id: true,
-        nome: true,
-      },
-    }),
-  ]);
 
-  return res.json({
-    blocos,
-    especialidades,
-  });
+export async function getRoomFilters(req: Request, res: Response) {
+  const { userId, hierarquia } = (req as any).user || {};
+
+  if (!userId) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    let blocos;
+
+    // 🔐 ADMIN → só blocos permitidos
+    if (hierarquia === "admin") {
+      const scopes = await prisma.adminScope.findMany({
+        where: {
+          adminId: userId,
+        },
+        select: {
+          blocoId: true,
+        },
+      });
+
+      const blocoIds = scopes.map((s) => s.blocoId);
+
+      blocos = await prisma.blocoRoom.findMany({
+        where: {
+          id: { in: blocoIds },
+        },
+        orderBy: { nome: "asc" },
+        select: {
+          id: true,
+          nome: true,
+        },
+      });
+    } else {
+      // boss → todos blocos
+      blocos = await prisma.blocoRoom.findMany({
+        orderBy: { nome: "asc" },
+        select: {
+          id: true,
+          nome: true,
+        },
+      });
+    }
+
+    const especialidades = await prisma.especialidadeRoom.findMany({
+      orderBy: { nome: "asc" },
+      select: {
+        id: true,
+        nome: true,
+      },
+    });
+
+    return res.json({
+      blocos,
+      especialidades,
+    });
+  } catch (error) {
+    console.error("Erro ao buscar filtros:", error);
+
+    return res.status(500).json({
+      error: "Erro interno ao buscar filtros.",
+    });
+  }
 }
 
 //------------------------------------------------
@@ -65,12 +107,7 @@ export async function listUsers(req: Request, res: Response) {
         // 🔥 IMPORTANTE: trazer áreas vinculadas
         adminScopes: {
           select: {
-            bloco: {
-              select: {
-                id: true,
-                nome: true,
-              },
-            },
+            blocoId: true,
           },
         },
       },
@@ -84,13 +121,12 @@ export async function listUsers(req: Request, res: Response) {
         if (u.hierarquia === "boss") {
           return {
             ...rest,
-            areas: "ACESSO_TOTAL",
           };
         }
 
         return {
           ...rest,
-          areas: adminScopes.map((scope) => scope.bloco),
+          areas: adminScopes.map((scope) => scope.blocoId),
         };
       });
 
@@ -311,6 +347,7 @@ export async function createUser(req: Request, res: Response) {
 export async function editUser(req: Request, res: Response) {
   try {
     const id = Number(req.params.id);
+    const authUser = (req as any).user;
 
     const schema = z.object({
       nome: z.string().optional(),
@@ -320,6 +357,7 @@ export async function editUser(req: Request, res: Response) {
       descricao: z.string().optional(),
       active: z.boolean().optional(),
       force: z.boolean().optional(),
+      areas: z.array(z.number()).optional(),
     });
 
     if (Number.isNaN(id)) {
@@ -328,7 +366,7 @@ export async function editUser(req: Request, res: Response) {
 
     const data = schema.parse(req.body);
 
-    const { force, ...userData } = data;
+    const { force, areas, ...userData } = data;
 
     const userExists = await prisma.user.findUnique({
       where: { id },
@@ -362,7 +400,6 @@ export async function editUser(req: Request, res: Response) {
         }
       }
 
-      // 🔥 SOMENTE USER tem cancelamento automático
       if (userExists.hierarquia === "user") {
         const futureSchedules = await prisma.roomPeriod.findMany({
           where: {
@@ -402,6 +439,7 @@ export async function editUser(req: Request, res: Response) {
         }
       }
     }
+
     // ===============================
     // ATUALIZA USUÁRIO
     // ===============================
@@ -416,6 +454,19 @@ export async function editUser(req: Request, res: Response) {
       where: { id },
       data: userData,
     });
+
+    if (areas && userExists.hierarquia === "admin") {
+      await prisma.adminScope.deleteMany({
+        where: { adminId: id },
+      });
+
+      await prisma.adminScope.createMany({
+        data: areas.map((blocoId) => ({
+          adminId: id,
+          blocoId,
+        })),
+      });
+    }
 
     return res.status(200).json({ message: "Usuário atualizado com sucesso" });
   } catch (error) {
@@ -532,6 +583,165 @@ export async function deleteUser(req: Request, res: Response) {
   return res.status(200).json({
     message: "Usuário deletado com sucesso",
   });
+}
+
+// proprio usuario
+export async function myInfo(req: Request, res: Response) {
+  try {
+    const authUser = (req as any).user;
+
+    const user = await prisma.user.findUnique({
+      where: { id: authUser.userId },
+      select: {
+        login: true,
+        email: true,
+        nome: true,
+        telefone: true,
+        descricao: true,
+        hierarquia: true,
+        especialidade: {
+          select: {
+            id: true,
+            nome: true,
+          },
+        },
+        adminScopes: {
+          select: {
+            bloco: {
+              select: {
+                id: true,
+                nome: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Usuário não encontrado",
+      });
+    }
+
+    return res.json({
+      ...user,
+      areas: user.adminScopes.map((a) => a.bloco),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro interno no servidor",
+    });
+  }
+}
+
+export async function editMySelf(req: Request, res: Response) {
+  const schema = z.object({
+    nome: z.string().optional(),
+    email: z
+      .string()
+      .email()
+      .optional()
+      .or(z.literal("").transform(() => undefined)),
+    telefone: z.string().optional(),
+    descricao: z.string().optional(),
+  });
+
+  try {
+    const authUser = (req as any).user;
+
+    const data = schema.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { id: authUser.userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Usuário não encontrado",
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: authUser.userId },
+      data,
+    });
+
+    return res.json({
+      message: "Perfil atualizado com sucesso",
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        message: "Dados inválidos",
+        errors: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Erro interno no servidor",
+    });
+  }
+}
+export async function changePass(req: Request, res: Response) {
+  const schema = z.object({
+    senhaAtual: z.string(),
+    novaSenha: z.string().min(6),
+  });
+
+  try {
+    const authUser = (req as any).user;
+
+    const { senhaAtual, novaSenha } = schema.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { id: authUser.userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Usuário não encontrado",
+      });
+    }
+
+    const senhaCorreta = await bcrypt.compare(senhaAtual, user.senha);
+
+    if (!senhaCorreta) {
+      return res.status(400).json({
+        message: "Senha atual incorreta",
+      });
+    }
+
+    const senhaHash = await bcrypt.hash(novaSenha, 10);
+
+    await prisma.user.update({
+      where: { id: authUser.userId },
+      data: {
+        senha: senhaHash,
+      },
+    });
+
+    return res.json({
+      message: "Senha alterada com sucesso",
+    });
+  } catch (error) {
+    console.error(error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        message: "Dados inválidos",
+        errors: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      message: "Erro interno no servidor",
+    });
+  }
 }
 
 //------------------------------------------------

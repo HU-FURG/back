@@ -1,238 +1,461 @@
 import { prisma } from "./client";
-import { updateSystemLog } from "./systemLog";
-import { Prisma } from "@prisma/client";
 import { DateTime } from "luxon";
 
-function durationInMinutes(start: Date, end: Date): number {
-  return Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+async function applyUpdatesBatch(updates: any[]) {
+  if (!updates.length) return;
+
+  await Promise.all(
+    updates.map((u) =>
+      prisma.roomPeriod.update({
+        where: { id: u.id },
+        data: {
+          start: u.start,
+          end: u.end,
+          atualRecurrenceCount: u.atualRecurrenceCount,
+        },
+      }),
+    ),
+  );
 }
 
-export const clearPeriodsandUpdate = async () => {
-  const agora = DateTime.now().toUTC();
-  const hojeUTC = agora.startOf("day");
-  const amanhaUTC = hojeUTC.plus({ days: 1 });
-  const sevenDaysInMs = 7 * 24 * 60 * 60 * 1000;
+async function insertHistoryBatch(history: any[]) {
+  if (!history.length) return;
 
-  try {
-    // =====================================================
-    // 1️⃣ CRIAR roomTimeUsedDaily PARA TODAS AS SALAS
-    // =====================================================
+  await prisma.periodHistory.createMany({
+    data: history,
+  });
+}
+
+function processRecurrences(periods: any[]) {
+  const history: any[] = [];
+  const updates: any[] = [];
+  const deletes: number[] = [];
+
+  const yesterday = DateTime.now().minus({ days: 1 }).startOf("day");
+
+  for (const period of periods) {
+    let start = DateTime.fromJSDate(period.start);
+    let end = DateTime.fromJSDate(period.end);
+
+    let atualRecurrenceCount = period.atualRecurrenceCount ?? 0;
+
+    const endSchedule = period.endSchedule
+      ? DateTime.fromJSDate(period.endSchedule)
+      : null;
+
+    let deleted = false;
+    // RESERVA AINDA FUTURA
+
+    if (start.startOf("day") > yesterday) {
+      continue;
+    }
+
+    // RESERVA JÁ PASSOU DO SCHEDULE
+
+    if (endSchedule && start > endSchedule) {
+      deletes.push(period.id);
+      continue;
+    }
+    while (start.startOf("day") <= yesterday) {
+      const duration = Math.floor((end.toMillis() - start.toMillis()) / 60000);
+
+      // -------------------------
+      // HISTÓRICO
+      // -------------------------
+
+      history.push({
+        idPeriod: period.id,
+
+        roomIdAmbiente: period.room.ID_Ambiente,
+        roomBloco: period.room.bloco.nome,
+
+        createdById: period.createdBy?.id ?? null,
+        scheduledForId: period.scheduledFor?.id ?? null,
+
+        createdByLogin: period.createdBy?.login ?? null,
+        createdByNome: period.createdBy?.nome ?? null,
+
+        scheduledForLogin: period.scheduledFor?.login ?? null,
+        scheduledForNome: period.scheduledFor?.nome ?? null,
+
+        start: start.toJSDate(),
+        end: end.toJSDate(),
+
+        weekday: start.weekday,
+
+        durationMinutes: duration,
+        actualDurationMinutes: null,
+
+        archivedAt: new Date(),
+      });
+
+      // -------------------------
+      // SE NÃO FOR RECORRENTE
+      // -------------------------
+
+      if (!period.isRecurring) {
+        deletes.push(period.id);
+        deleted = true;
+        break;
+      }
+
+      // -------------------------
+      // AVANÇA 7 DIAS
+      // -------------------------
+
+      start = start.plus({ days: 7 });
+      end = end.plus({ days: 7 });
+
+      atualRecurrenceCount++;
+
+      // -------------------------
+      // REGRAS DE DELETE
+      // -------------------------
+
+      if (endSchedule && start > endSchedule) {
+        deletes.push(period.id);
+        deleted = true;
+        break;
+      }
+
+      if (
+        period.countRecurrence &&
+        atualRecurrenceCount > period.countRecurrence
+      ) {
+        deletes.push(period.id);
+        deleted = true;
+        break;
+      }
+    }
+
+    // -------------------------
+    // UPDATE FINAL
+    // -------------------------
+
+    if (!deleted) {
+      updates.push({
+        id: period.id,
+        start: start.toJSDate(),
+        end: end.toJSDate(),
+        atualRecurrenceCount: atualRecurrenceCount,
+      });
+    }
+  }
+
+  return { history, updates, deletes };
+}
+
+async function applyDeletesBatch(deletes: number[]) {
+  if (!deletes.length) return;
+  console.log("delete");
+  await prisma.roomPeriod.deleteMany({
+    where: {
+      id: { in: deletes },
+    },
+  });
+}
+
+async function processPcUsage() {
+  const yesterday = DateTime.now().minus({ days: 1 }).endOf("day").toJSDate();
+
+  const events = await prisma.pcUsageEvent.findMany({
+    where: {
+      eventTime: { lte: yesterday },
+    },
+    orderBy: { eventTime: "asc" },
+  });
+
+  if (!events.length) return;
+
+  // -------------------------
+  // INDEXAÇÃO POR SALA
+  // -------------------------
+
+  const eventsByRoom = new Map<string, Date[]>();
+
+  for (const e of events) {
+    if (!eventsByRoom.has(e.roomIdAmbiente)) {
+      eventsByRoom.set(e.roomIdAmbiente, []);
+    }
+
+    eventsByRoom.get(e.roomIdAmbiente)!.push(e.eventTime);
+  }
+
+  const histories = await prisma.periodHistory.findMany({
+    where: {
+      start: { lte: yesterday },
+    },
+  });
+
+  const updates = [];
+
+  for (const history of histories) {
+    const roomEvents = eventsByRoom.get(history.roomIdAmbiente);
+
+    if (!roomEvents) continue;
+
+    const start = history.start.getTime();
+    const end = history.end.getTime();
+
+    let first: Date | null = null;
+    let last: Date | null = null;
+
+    for (const eventTime of roomEvents) {
+      const t = eventTime.getTime();
+
+      if (t < start) continue;
+      if (t > end) break;
+
+      if (!first) first = eventTime;
+      last = eventTime;
+    }
+
+    if (!first || !last) continue;
+
+    const duration = Math.floor((last.getTime() - first.getTime()) / 60000);
+
+    updates.push(
+      prisma.periodHistory.update({
+        where: { id: history.id },
+        data: {
+          used: true,
+          startService: first,
+          endService: last,
+          actualDurationMinutes: duration,
+        },
+      }),
+    );
+  }
+
+  if (updates.length) {
+    await Promise.all(updates);
+  }
+
+  // limpa telemetria
+  await prisma.$executeRawUnsafe(`TRUNCATE TABLE "PcUsageEvent"`);
+}
+
+async function generateDailyReports() {
+  console.log("GErando relatorio diario salas");
+  const yesterday = DateTime.now().minus({ days: 1 }).startOf("day");
+
+  // ------------------------------------------------
+  // DESCOBRIR DIA INICIAL
+  // ------------------------------------------------
+
+  const lastDaily = await prisma.periodReportDaily.findFirst({
+    orderBy: { ScheduleDay: "desc" },
+  });
+
+  let startDay: DateTime | null = null;
+
+  if (lastDaily) {
+    startDay = DateTime.fromJSDate(lastDaily.ScheduleDay)
+      .plus({ days: 1 })
+      .startOf("day");
+  } else {
+    const firstHistory = await prisma.periodHistory.findFirst({
+      orderBy: { start: "asc" },
+    });
+
+    if (!firstHistory) return;
+
+    startDay = DateTime.fromJSDate(firstHistory.start).startOf("day");
+  }
+
+  // ------------------------------------------------
+  // LOOP DE DIAS
+  // ------------------------------------------------
+
+  while (startDay <= yesterday) {
+    const dayStart = startDay.startOf("day").toJSDate();
+    const dayEnd = startDay.endOf("day").toJSDate();
 
     const rooms = await prisma.room.findMany({
-      select: {
-        id: true,
-        ID_Ambiente: true,
-        bloco: { select: { nome: true } },
+      include: { bloco: true },
+    });
+
+    const histories = await prisma.periodHistory.findMany({
+      where: {
+        start: {
+          gte: dayStart,
+          lte: dayEnd,
+        },
       },
     });
 
-    const roomDailyMap = new Map<string, number>();
+    const scheduleMap = new Map<string, number>();
+    const usedMap = new Map<string, number>();
+
+    // ----------------------------------------------
+    // SOMA DOS HISTÓRICOS
+    // ----------------------------------------------
+
+    for (const h of histories) {
+      const schedule = scheduleMap.get(h.roomIdAmbiente) ?? 0;
+
+      scheduleMap.set(h.roomIdAmbiente, schedule + (h.durationMinutes ?? 0));
+
+      if (h.used && h.actualDurationMinutes) {
+        const used = usedMap.get(h.roomIdAmbiente) ?? 0;
+
+        usedMap.set(h.roomIdAmbiente, used + h.actualDurationMinutes);
+      }
+    }
+
+    const reports: any[] = [];
+
+    // ----------------------------------------------
+    // GERAR REPORT POR SALA
+    // ----------------------------------------------
 
     for (const room of rooms) {
-      const reservasDoDia = await prisma.roomPeriod.findMany({
-        where: {
-          roomId: room.id,
-          start: {
-            gte: hojeUTC.toJSDate(),
-            lt: amanhaUTC.toJSDate(),
-          },
-        },
+      const scheduleMinutes = scheduleMap.get(room.ID_Ambiente) ?? 0;
+
+      const usedMinutes = usedMap.get(room.ID_Ambiente) ?? 0;
+
+      reports.push({
+        dayWeek: startDay.weekday,
+        ScheduleDay: dayStart,
+
+        roomIdAmbiente: room.ID_Ambiente,
+        roomBloco: room.bloco.nome,
+
+        SalaAtiva: room.active,
+
+        totalScheduleMinutes: scheduleMinutes,
+        totalUsedMinutes: usedMinutes,
       });
-
-      const totalUsedMinutes = reservasDoDia.reduce((acc, r) => {
-        return acc + durationInMinutes(r.start, r.end);
-      }, 0);
-
-      const daily = await prisma.roomTimeUsedDaily.create({
-        data: {
-          date: hojeUTC.toJSDate(),
-          weekday: hojeUTC.weekday,
-          roomIdAmbiente: room.ID_Ambiente,
-          roomBloco: room.bloco.nome,
-          totalUsedMinutes,
-        },
-      });
-
-      roomDailyMap.set(room.ID_Ambiente, daily.id);
     }
 
-    // =====================================================
-    // 2️⃣ PROCESSAR PERÍODOS VENCIDOS
-    // =====================================================
+    // ----------------------------------------------
+    // INSERÇÃO
+    // ----------------------------------------------
 
-    const recurringToUpdate = await prisma.$transaction(async (tx) => {
-      const periods = await tx.roomPeriod.findMany({
-        where: {
-          end: { lt: agora.toJSDate() },
-        },
-        include: {
-          room: {
-            select: {
-              ID_Ambiente: true,
-              bloco: { select: { nome: true } },
-            },
-          },
-        },
+    if (reports.length) {
+      await prisma.periodReportDaily.createMany({
+        data: reports,
       });
+    }
 
-      if (!periods.length) {
-        console.log("[✅] Nenhum período expirado encontrado.");
-        return [];
-      }
+    // próximo dia
+    startDay = startDay.plus({ days: 1 });
+  }
+}
 
-      const userIds = [
-        ...new Set(
-          periods
-            .map((p) => p.scheduledForId)
-            .filter((id): id is number => Boolean(id)),
-        ),
-      ];
+async function cleanupOldCanceledReservations() {
+  const limitDate = DateTime.now().minus({ days: 30 }).toJSDate();
 
-      const users = await tx.user.findMany({
-        where: { id: { in: userIds } },
-        select: { id: true, nome: true },
-      });
+  const result = await prisma.roomPeriodCanceled.deleteMany({
+    where: {
+      canceledAt: {
+        lt: limitDate,
+      },
+    },
+  });
 
-      const userMap = new Map(users.map((u) => [u.id, u.nome]));
+  if (result.count) {
+    console.log(`🧹 ${result.count} reservas canceladas removidas`);
+  }
+}
 
-      const historyData: Prisma.PeriodHistoryCreateManyInput[] = [];
-      const templateData: Prisma.RoomScheduleTemplateCreateManyInput[] = [];
-      const reportDailyData: Prisma.PeriodReportDailyCreateManyInput[] = [];
-      const toDeleteIds: number[] = [];
-      const recurringValid: typeof periods = [];
+async function cleanupDisabledUsers() {
+  const limitDate = DateTime.now().minus({ days: 30 }).toJSDate();
 
-      for (const period of periods) {
-        const duration = durationInMinutes(period.start, period.end);
+  const users = await prisma.user.findMany({
+    where: {
+      active: false,
+      updatedAt: {
+        lt: limitDate,
+      },
+    },
+    select: { id: true },
+  });
 
-        const scheduledForNome = period.scheduledForId
-          ? (userMap.get(period.scheduledForId) ?? "Desconhecido")
-          : "Desconhecido";
+  if (!users.length) return;
 
-        const roomDailyId = roomDailyMap.get(period.room.ID_Ambiente);
+  const deletable: number[] = [];
 
-        // --------------------------
-        // HISTÓRICO
-        // --------------------------
-
-        historyData.push({
-          roomIdAmbiente: period.room.ID_Ambiente,
-          roomBloco: period.room.bloco.nome,
-          roomTipo: null,
-
-          createdById: period.createdById,
-          scheduledForId: period.scheduledForId,
-
-          createdByLogin: null,
-          createdByNome: null,
-          scheduledForLogin: null,
-          scheduledForNome,
-
-          start: period.start,
-          end: period.end,
-          weekday: ((period.start.getUTCDay() + 6) % 7) + 1,
-
-          used: false,
-          startService: null,
-          endService: null,
-
-          durationMinutes: duration,
-          actualDurationMinutes: null,
-          archivedAt: agora.toJSDate(),
-        });
-
-        // --------------------------
-        // RELATÓRIO DIÁRIO
-        // --------------------------
-
-        if (roomDailyId) {
-          reportDailyData.push({
-            idPeriod: period.id,
-            createdById: period.createdById,
-            scheduledForId: period.scheduledForId!,
-            start: period.start,
-            end: period.end,
-            totalUsedMinutes: duration,
-            availabilityStatus: period.availabilityStatus,
-            typeSchedule: period.typeSchedule,
-            used: false,
-            roomDailyId,
-          });
-        }
-
-        // --------------------------
-        // CONTROLE DE RECORRÊNCIA
-        // --------------------------
-
-        const exceededLimit =
-          period.isRecurring &&
-          period.countRecurrence !== null &&
-          period.atualRecurrenceCount !== null &&
-          period.atualRecurrenceCount + 1 >= period.countRecurrence;
-
-        if (!period.isRecurring || exceededLimit) {
-          if (period.typeSchedule === "consulta") {
-            templateData.push({
-              createdById: period.createdById,
-              scheduledForId: period.scheduledForId,
-              durationInMinutes: duration,
-              roomIdAmbiente: period.room.ID_Ambiente,
-              roomBloco: period.room.bloco.nome,
-              originalStart: period.start,
-              originalEnd: period.end,
-              reason: period.isRecurring
-                ? "Limite de recorrência atingido"
-                : "Reserva vencida",
-              archivedAt: agora.toJSDate(),
-            });
-          }
-
-          // Aula ou consulta sempre é removido do período ativo
-          toDeleteIds.push(period.id);
-        } else {
-          recurringValid.push(period);
-        }
-      }
-
-      if (historyData.length)
-        await tx.periodHistory.createMany({ data: historyData });
-
-      if (reportDailyData.length)
-        await tx.periodReportDaily.createMany({ data: reportDailyData });
-
-      if (templateData.length)
-        await tx.roomScheduleTemplate.createMany({ data: templateData });
-
-      if (toDeleteIds.length)
-        await tx.roomPeriod.deleteMany({ where: { id: { in: toDeleteIds } } });
-
-      return recurringValid;
+  for (const user of users) {
+    const hasPeriods = await prisma.roomPeriod.findFirst({
+      where: {
+        OR: [{ createdById: user.id }, { scheduledForId: user.id }],
+      },
     });
 
-    // =====================================================
-    // 3️⃣ ATUALIZAR RECORRÊNCIAS VÁLIDAS
-    // =====================================================
+    if (hasPeriods) continue;
 
-    if (recurringToUpdate.length) {
-      await Promise.all(
-        recurringToUpdate.map((period) =>
-          prisma.roomPeriod.update({
-            where: { id: period.id },
-            data: {
-              start: new Date(period.start.getTime() + sevenDaysInMs),
-              end: new Date(period.end.getTime() + sevenDaysInMs),
-              atualRecurrenceCount: { increment: 1 },
-            },
-          }),
-        ),
-      );
-    }
+    const hasTemplates = await prisma.roomScheduleTemplate.findFirst({
+      where: {
+        OR: [{ createdById: user.id }, { scheduledForId: user.id }],
+      },
+    });
 
-    await updateSystemLog("last_clear_update", agora.toISO());
+    if (hasTemplates) continue;
 
-    console.log(
-      `[✅] Clear concluído. ${recurringToUpdate.length} recorrências atualizadas.`,
-    );
-  } catch (error) {
-    console.error("[❌] Erro crítico no clear:", error);
+    const hasCanceled = await prisma.roomPeriodCanceled.findFirst({
+      where: {
+        OR: [
+          { createdById: user.id },
+          { scheduledForId: user.id },
+          { canceledById: user.id },
+        ],
+      },
+    });
+
+    if (hasCanceled) continue;
+
+    deletable.push(user.id);
   }
+
+  if (!deletable.length) return;
+
+  await prisma.user.deleteMany({
+    where: {
+      id: { in: deletable },
+    },
+  });
+
+  console.log(`🧹 ${deletable.length} usuários desativados removidos`);
+}
+
+export const clear = async () => {
+  console.log("Starting CLEAR...");
+
+  const periods = await prisma.roomPeriod.findMany({
+    include: {
+      room: { include: { bloco: true } },
+      createdBy: {
+        select: { id: true, login: true, nome: true },
+      },
+      scheduledFor: {
+        select: { id: true, login: true, nome: true },
+      },
+    },
+  });
+  // criação de historico
+
+  const { history, updates, deletes } = processRecurrences(periods);
+
+  await insertHistoryBatch(history);
+
+  await applyUpdatesBatch(updates);
+
+  await applyDeletesBatch(deletes);
+
+  // validação de uso de salas
+  await processPcUsage();
+
+  // Criar daily salas
+  await generateDailyReports();
+
+  // limpeza de cancelamentos antigos
+  await cleanupOldCanceledReservations();
+
+  // limpeza de usuários desativados
+  await cleanupDisabledUsers();
+
+  console.log(
+    `CLEAR finished | history: ${history.length} | updates: ${updates.length} | deletes: ${deletes.length}`,
+  );
 };

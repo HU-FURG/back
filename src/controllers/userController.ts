@@ -17,7 +17,7 @@ export const login = async (req: Request, res: Response) => {
   const { login, senha, remember } = loginSchema.parse(req.body);
 
   const user = await prisma.user.findUnique({
-    where: { login, active: true },
+    where: { login },
   });
 
   if (!user) {
@@ -36,6 +36,15 @@ export const login = async (req: Request, res: Response) => {
       error: {
         code: "INVALID_CREDENTIALS",
         message: "Login ou senha incorretos",
+      },
+    });
+  }
+
+  if (!user.active) {
+    return res.status(401).json({
+      error: {
+        code: "USER_DISABLED",
+        message: "Usuário desativado",
       },
     });
   }
@@ -86,7 +95,6 @@ export async function validateToken(req: Request, res: Response) {
 
 export function logout(req: Request, res: Response) {
   try {
-    console.log("🚪 Logout solicitado");
     res.clearCookie("token", {
       httpOnly: true,
       sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",

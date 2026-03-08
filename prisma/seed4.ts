@@ -1,267 +1,274 @@
 import { PrismaClient } from "@prisma/client";
+import { DateTime } from "luxon";
 
 const prisma = new PrismaClient();
+const TZ = "America/Sao_Paulo";
 
-// Função auxiliar para embaralhar array
-function shuffleArray<T>(array: T[]): T[] {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+function countWeekdays(start: DateTime, end: DateTime, weekday: number) {
+  let count = 0;
+
+  let current = start.startOf("day");
+
+  while (current <= end) {
+    if (current.weekday === weekday) {
+      count++;
+    }
+    current = current.plus({ days: 1 });
   }
-  return arr;
+
+  return count;
 }
 
-// Função para pegar N dias da semana aleatórios únicos (1=Segunda, 5=Sexta)
-function getRandomWeekdays(count: number): number[] {
-  const days = [1, 2, 3, 4, 5];
-  const shuffled = shuffleArray(days);
-  return shuffled.slice(0, count);
+async function generatePcUsageEvents(periods: any[], rooms: any[]) {
+  const events: any[] = [];
+
+  for (const period of periods) {
+    const room = rooms.find((r) => r.id === period.roomId);
+    if (!room) continue;
+
+    const start = DateTime.fromJSDate(period.start);
+    const end = DateTime.fromJSDate(period.end);
+
+    const rand = Math.random();
+
+    // 20% sala não usada
+    if (rand < 0.2) continue;
+
+    let usageStart = start;
+    let usageEnd = end;
+
+    // 40% uso parcial
+    if (rand < 0.6) {
+      usageStart = start.plus({ minutes: 10 + Math.floor(Math.random() * 30) });
+      usageEnd = end.minus({ minutes: 10 + Math.floor(Math.random() * 30) });
+    }
+
+    const mid = usageStart.plus({
+      minutes: Math.floor(usageEnd.diff(usageStart, "minutes").minutes / 2),
+    });
+
+    events.push({
+      roomIdAmbiente: room.ID_Ambiente,
+      eventType: "iniciou",
+      targetApp: "chrome.exe",
+      eventTime: usageStart.toJSDate(),
+    });
+
+    events.push({
+      roomIdAmbiente: room.ID_Ambiente,
+      eventType: "usou",
+      targetApp: "chrome.exe",
+      eventTime: mid.toJSDate(),
+    });
+
+    events.push({
+      roomIdAmbiente: room.ID_Ambiente,
+      eventType: "encerrou",
+      targetApp: "chrome.exe",
+      eventTime: usageEnd.toJSDate(),
+    });
+  }
+
+  if (events.length) {
+    await prisma.pcUsageEvent.createMany({
+      data: events,
+    });
+  }
+
+  console.log(`🖥️ ${events.length} eventos de uso simulados.`);
 }
 
 async function main() {
-  console.log("🧹 Limpando apenas tabelas de relatório...");
-  await prisma.roomStats.deleteMany({});
-  await prisma.dailyRoomReport.deleteMany({});
-  
-  const rawRooms = await prisma.room.findMany();
-  const rawUsers = await prisma.user.findMany();
+  console.log("🔎 Preparando ambiente de teste do clear...");
 
-  if (rawRooms.length === 0 || rawUsers.length === 0) {
-    console.error("❌ ERRO: Faltam dados base (Rooms ou Users).");
+  const admin = await prisma.user.findFirst({
+    where: { hierarquia: "boss" },
+  });
+
+  const users = await prisma.user.findMany({
+    where: { hierarquia: "user" },
+  });
+
+  const rooms = await prisma.room.findMany({
+    include: { bloco: true },
+  });
+
+  if (!admin || !users.length || !rooms.length) {
+    console.log("❌ Seed abortado: dados insuficientes.");
     return;
   }
 
-  // Embaralha as listas para garantir aleatoriedade
-  const availableRooms = shuffleArray([...rawRooms]);
-  const availableUsers = shuffleArray([...rawUsers]);
+  console.log("🧹 Limpando dados antigos...");
 
-  console.log(`✅ Base carregada. Salas: ${availableRooms.length} | Usuários: ${availableUsers.length}`);
+  await prisma.periodHistory.deleteMany();
+  await prisma.periodReportDaily.deleteMany();
+  await prisma.roomPeriod.deleteMany();
+  await prisma.pcUsageEvent.deleteMany();
 
-  // ---------------------------------------------------------
-  // 1️⃣ GERAÇÃO DE AGENDAMENTOS DUPLOS (Manhã e Tarde)
-  // ---------------------------------------------------------
-  console.log("📅 Iniciando simulação com DOIS usuários por sala (Manhã/Tarde)...");
+  // -------------------------------------------------
+  // BASE 3 MESES ATRÁS
+  // -------------------------------------------------
 
-  const reportsToCreate: any[] = [];
-  
-  const currentYear = new Date().getFullYear();
-  const startDate = new Date(currentYear, 5, 1); // Junho
-  const endDate = new Date(currentYear, 9, 31);  // Outubro
-  
-  // Turnos (Total Dia = 540 min)
-  const TOTAL_DIA_MIN = 540;
-  const TURNO_MANHA_MIN = 240; // 08h-12h
-  const TURNO_TARDE_MIN = 300; // 13h-18h
+  const scheduleStart = DateTime.now()
+    .setZone(TZ)
+    .minus({ months: 3 })
+    .startOf("day");
 
-  let pairingsCount = 0;
+  const scheduleEnd = DateTime.now().setZone(TZ).startOf("day");
+  const baseDay = scheduleStart.startOf("week");
 
-  // LOOP PRINCIPAL: Enquanto houver SALA e pelo menos 1 USUÁRIO
-  while (availableRooms.length > 0 && availableUsers.length > 0) {
-    pairingsCount++;
+  const periodsByRoom = new Map<number, any[]>();
 
-    // 1. Pega a Sala
-    const room = availableRooms.pop()!;
+  const novosPeriodos: any[] = [];
 
-    // 2. Tenta pegar 2 Usuários (Manhã e Tarde)
-    const userMorning = availableUsers.pop()!; 
-    const userAfternoon = availableUsers.length > 0 ? availableUsers.pop() : null; // Pode ser que falte usuário pro par
+  for (let dia = 0; dia < 5; dia++) {
+    const dayBase = baseDay.plus({ days: dia });
 
-    // 3. Define o "Contrato" de cada um (Dias da semana que eles atendem)
-    // Manhã: Sorteia 3 a 5 dias
-    const daysCountM = Math.floor(Math.random() * (5 - 3 + 1)) + 3; 
-    const daysMorning = getRandomWeekdays(daysCountM);
+    for (const user of users) {
+      const startHour =
+        Math.random() < 0.5
+          ? 8 + Math.floor(Math.random() * 3)
+          : 13 + Math.floor(Math.random() * 3);
 
-    // Tarde: Sorteia 3 a 5 dias (se existir o user da tarde)
-    const daysCountA = Math.floor(Math.random() * (5 - 3 + 1)) + 3; 
-    const daysAfternoon = userAfternoon ? getRandomWeekdays(daysCountA) : [];
+      const endHour = startHour + 3;
 
-    // 4. Itera sobre os dias do calendário
-    const currentDateIterator = new Date(startDate);
-    
-    while (currentDateIterator <= endDate) {
-      const currentDayOfWeek = currentDateIterator.getDay();
-      
-      // Verifica se HOJE tem agendamento para Manhã ou Tarde (ou ambos)
-      const hasMorningSchedule = daysMorning.includes(currentDayOfWeek);
-      const hasAfternoonSchedule = daysAfternoon.includes(currentDayOfWeek);
-
-      // Se nenhum dos dois atende hoje, não gera registro (ou gera inativo, mas aqui vamos pular pra economizar linhas)
-      if (!hasMorningSchedule && !hasAfternoonSchedule) {
-        currentDateIterator.setDate(currentDateIterator.getDate() + 1);
-        continue;
-      }
-
-      const reportDate = new Date(currentDateIterator);
-      let dayUsedMinutes = 0;
-      let dayCancellationCount = 0;
-      const dayAttendedList: any[] = [];
-
-      // --- Processa Turno da Manhã ---
-      if (hasMorningSchedule) {
-        // 20% de chance de faltar (No-Show)
-        const isNoShowM = Math.random() < 0.20;
-        
-        if (isNoShowM) {
-          dayCancellationCount++; 
-          // Tempo usado não soma nada
-        } else {
-          dayUsedMinutes += TURNO_MANHA_MIN;
-          dayAttendedList.push({
-            userId: userMorning.id,
-            nome: userMorning.nome,
-            role: "Recorrente",
-            turno: "Manhã"
-          });
-        }
-      }
-
-      // --- Processa Turno da Tarde ---
-      if (hasAfternoonSchedule && userAfternoon) {
-        // 20% de chance de faltar (No-Show)
-        const isNoShowA = Math.random() < 0.20;
-
-        if (isNoShowA) {
-          dayCancellationCount++;
-        } else {
-          dayUsedMinutes += TURNO_TARDE_MIN;
-          dayAttendedList.push({
-            userId: userAfternoon.id,
-            nome: userAfternoon.nome,
-            role: "Recorrente",
-            turno: "Tarde"
-          });
-        }
-      }
-
-      // --- Consolida o Dia ---
-      const dayUnusedMinutes = Math.max(0, TOTAL_DIA_MIN - dayUsedMinutes);
-
-      reportsToCreate.push({
-        date: reportDate,
-        roomIdAmbiente: room.ID_Ambiente,
-        roomBloco: room.bloco,
-        wasActive: true, // Se caiu aqui, é porque tinha agendamento (mesmo que tenha sido cancelado)
-        totalUsedMinutes: dayUsedMinutes,
-        totalUnusedMinutes: dayUnusedMinutes,
-        cancellationCount: dayCancellationCount, // Pode ser 0, 1 ou 2 (se ambos faltarem)
-        attendedUsersList: dayAttendedList, // Pode ter 0, 1 ou 2 pessoas
+      const startLocal = dayBase.set({
+        hour: startHour,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
       });
 
-      // Próximo dia
-      currentDateIterator.setDate(currentDateIterator.getDate() + 1);
-    }
-  }
+      const endLocal = dayBase.set({
+        hour: endHour,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+      });
 
-  console.log(`✨ ${pairingsCount} salas preenchidas com agendas duplas.`);
-  console.log(`💾 Salvando ${reportsToCreate.length} relatórios diários no banco...`);
-  
-  const BATCH_SIZE = 2000; 
-  for (let i = 0; i < reportsToCreate.length; i += BATCH_SIZE) {
-    const batch = reportsToCreate.slice(i, i + BATCH_SIZE);
-    await prisma.dailyRoomReport.createMany({ data: batch });
-    console.log(`   ...lote ${Math.floor(i / BATCH_SIZE) + 1} inserido.`);
-  }
+      const weekday = startLocal.weekday;
 
+      const startUTC = startLocal.toUTC().toJSDate();
+      const endUTC = endLocal.toUTC().toJSDate();
 
-  // ---------------------------------------------------------
-  // 2️⃣ CONSOLIDAÇÃO MENSAL (RoomStats)
-  // ---------------------------------------------------------
-  console.log("📊 Consolidando estatísticas mensais...");
+      let salaFinal = null;
 
-  const startMonth = 5; // Junho
-  const endMonth = 9;   // Outubro
+      for (const sala of rooms) {
+        const periodos = periodsByRoom.get(sala.id) ?? [];
 
-  for (let m = startMonth; m <= endMonth; m++) {
-    const firstDayOfMonth = new Date(currentYear, m, 1);
-    const lastDayOfMonth = new Date(currentYear, m + 1, 0);
-    lastDayOfMonth.setHours(23, 59, 59, 999);
+        const newStartMin = startLocal.hour * 60;
+        const newEndMin = endLocal.hour * 60;
 
-    console.log(`   Processando: ${firstDayOfMonth.toLocaleString('pt-BR', { month: 'long' })}...`);
+        let temConflito = false;
 
-    const monthReports = await prisma.dailyRoomReport.findMany({
-      where: {
-        date: { gte: firstDayOfMonth, lte: lastDayOfMonth }
-      }
-    });
+        for (const periodo of periodos) {
+          if (periodo.weekday !== weekday) continue;
 
-    if (monthReports.length === 0) continue;
+          const dbStart = DateTime.fromJSDate(periodo.start).setZone(TZ);
+          const dbEnd = DateTime.fromJSDate(periodo.end).setZone(TZ);
 
-    const roomMap = new Map<string, any>();
+          const dbStartMin = dbStart.hour * 60;
+          const dbEndMin = dbEnd.hour * 60;
 
-    for (const rep of monthReports) {
-      const key = rep.roomIdAmbiente;
-      
-      if (!roomMap.has(key)) {
-        roomMap.set(key, {
-          roomIdAmbiente: rep.roomIdAmbiente,
-          roomBloco: rep.roomBloco,
-          totalUsedMin: 0,
-          totalReservedMin: 0,
-          idleMinSum: 0,
-          activeDaysCount: 0,
-          cancellationCount: 0,
-          totalUsedCount: 0,
-          usageByWeekday: { 0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:0 } as any,
-        });
+          if (dbStartMin < newEndMin && dbEndMin > newStartMin) {
+            temConflito = true;
+            break;
+          }
+        }
+
+        if (!temConflito) {
+          salaFinal = sala;
+          break;
+        }
       }
 
-      const stats = roomMap.get(key);
-      const dayOfWeek = new Date(rep.date).getDay();
+      if (!salaFinal) continue;
 
-      if (rep.wasActive) {
-        const used = rep.totalUsedMinutes || 0;
-        const idle = rep.totalUnusedMinutes || 0;
-        const cancelled = rep.cancellationCount || 0;
-        
-        // Na lista pode ter até 2 pessoas agora
-        const attendedList = rep.attendedUsersList as any[];
-        const peopleCount = attendedList ? attendedList.length : 0;
-        
-        stats.totalUsedMin += used;
-        stats.totalReservedMin += used; // Simplificado
-        stats.idleMinSum += idle;
-        stats.activeDaysCount++;
-        stats.cancellationCount += cancelled;
-        
-        // Soma quantas pessoas realmente foram (attendance)
-        stats.totalUsedCount += peopleCount;
+      const startSchedule = scheduleStart.toUTC().toJSDate();
+      const endSchedule = DateTime.now()
+        .setZone(TZ)
+        .plus({ days: 3 })
+        .startOf("day");
 
-        stats.usageByWeekday[dayOfWeek] += used;
-      }
-    }
+      const recurrenceCount = countWeekdays(
+        scheduleStart,
+        endSchedule,
+        weekday,
+      );
 
-    const statsToCreate = Array.from(roomMap.values()).map(s => {
-      const avgIdleMin = s.activeDaysCount > 0 ? s.idleMinSum / s.activeDaysCount : 0;
-      const totalCapacity = s.totalUsedMin + s.idleMinSum;
-      const avgUsageRate = totalCapacity > 0 ? (s.totalUsedMin / totalCapacity) : 0;
+      const novoPeriodo = {
+        roomId: salaFinal.id,
+        createdById: admin.id,
+        scheduledForId: user.id,
 
-      return {
-        roomIdAmbiente: s.roomIdAmbiente,
-        roomBloco: s.roomBloco,
-        monthRef: firstDayOfMonth,
-        totalReservedMin: s.totalReservedMin,
-        totalUsedMin: s.totalUsedMin,
-        avgIdleMin: parseFloat(avgIdleMin.toFixed(2)),
-        avgUsageRate: parseFloat(avgUsageRate.toFixed(4)),
-        usageByWeekday: s.usageByWeekday,
-        totalBookings: s.totalUsedCount + s.cancellationCount,
-        totalUsed: s.totalUsedCount,
-        totalCanceled: s.cancellationCount,
+        start: startUTC,
+        end: endUTC,
+
+        weekday,
+
+        isRecurring: true,
+        approved: true,
+
+        startSchedule,
+        endSchedule,
+
+        countRecurrence: recurrenceCount,
+        atualRecurrenceCount: 0,
       };
-    });
 
-    if (statsToCreate.length > 0) {
-        await prisma.roomStats.createMany({ data: statsToCreate });
+      novosPeriodos.push(novoPeriodo);
+
+      if (!periodsByRoom.has(salaFinal.id)) {
+        periodsByRoom.set(salaFinal.id, []);
+      }
+
+      periodsByRoom.get(salaFinal.id)!.push(novoPeriodo);
     }
   }
 
-  console.log("✅ Seed finalizado com sucesso!");
+  await prisma.roomPeriod.createMany({
+    data: novosPeriodos,
+  });
+
+  await generatePcUsageEvents(novosPeriodos, rooms);
+
+  console.log(`✅ ${novosPeriodos.length} reservas criadas.`);
+
+  // -------------------------------------------------
+  // HISTÓRICO FALSO PARA INICIAR CLEAR
+  // -------------------------------------------------
+
+  const fakeDay = baseDay.minus({ days: 1 });
+  const room = rooms[0];
+
+  await prisma.periodHistory.create({
+    data: {
+      idPeriod: 0,
+
+      roomIdAmbiente: room.ID_Ambiente,
+      roomBloco: room.bloco.nome,
+
+      createdById: admin.id,
+      scheduledForId: users[0].id,
+
+      start: fakeDay.set({ hour: 9 }).toUTC().toJSDate(),
+      end: fakeDay.set({ hour: 12 }).toUTC().toJSDate(),
+
+      weekday: fakeDay.weekday,
+
+      durationMinutes: 180,
+      actualDurationMinutes: null,
+
+      archivedAt: new Date(),
+    },
+  });
+
+  console.log("📌 Histórico inicial criado.");
 }
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error("🔥 ERRO NO SEED:", e);
     process.exit(1);
   })
   .finally(async () => {

@@ -19,7 +19,7 @@ import monitorRoutes from "./routes/monitoramentoRoutes";
 import mapRoutes from "./routes/mapsRoutes";
 
 // routine
-import { clearPeriodsandUpdate } from "./prisma/clear";
+import { clear } from "./prisma/clear";
 import { getSystemLog } from "./prisma/systemLog";
 import { errorHandler } from "./middlewares/errorHandler";
 
@@ -85,8 +85,8 @@ app.listen(PORT, "0.0.0.0", async () => {
     const lastRun = log?.updatedAt ?? new Date(0);
     const diffHours = (Date.now() - lastRun.getTime()) / (1000 * 60 * 60);
 
-    if (diffHours >= 0) {
-      await clearPeriodsandUpdate();
+    if (diffHours >= 24) {
+      await clear();
     }
   } catch (err) {
     console.error("Erro no startup:", err);
@@ -94,7 +94,7 @@ app.listen(PORT, "0.0.0.0", async () => {
 
   cron.schedule("59 23 * * *", async () => {
     try {
-      await clearPeriodsandUpdate();
+      await clear();
     } catch (err) {
       console.error("Erro no cron:", err);
     }

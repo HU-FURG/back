@@ -263,183 +263,183 @@ const buscaSemAgente = async (req: Request, res: Response) => {
   }
 };
 
-const buscaComAgente = async (req: Request, res: Response) => {
-  try {
-    // ==================================================
-    // Tudo IGUAL à buscaSemAgente até salasDisponiveis
-    // ==================================================
-    const {
-      userId,
-      horarios,
-      recorrente,
-      maxTimeRecorrente,
-      lastRoomId,
-      numeroSala,
-      bloco,
-      tipo,
-      especialidadeRoom,
-    } = BodySchema.parse(req.body);
+// const buscaComAgente = async (req: Request, res: Response) => {
+//   try {
+//     // ==================================================
+//     // Tudo IGUAL à buscaSemAgente até salasDisponiveis
+//     // ==================================================
+//     const {
+//       userId,
+//       horarios,
+//       recorrente,
+//       maxTimeRecorrente,
+//       lastRoomId,
+//       numeroSala,
+//       bloco,
+//       tipo,
+//       especialidadeRoom,
+//     } = BodySchema.parse(req.body);
 
-    const TZ = "America/Sao_Paulo";
-    const agoraUTC = DateTime.now().setZone(TZ).toUTC();
+//     const TZ = "America/Sao_Paulo";
+//     const agoraUTC = DateTime.now().setZone(TZ).toUTC();
 
-    const result = validateHorarios(horarios, recorrente);
-    if (!result.ok) {
-      return res.status(400).json({ message: result.error });
-    }
+//     const result = validateHorarios(horarios, recorrente);
+//     if (!result.ok) {
+//       return res.status(400).json({ message: result.error });
+//     }
 
-    const usuarioAlvo = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, active: true, especialidadeId: true },
-    });
+//     const usuarioAlvo = await prisma.user.findUnique({
+//       where: { id: userId },
+//       select: { id: true, active: true, especialidadeId: true },
+//     });
 
-    if (!usuarioAlvo || !usuarioAlvo.active) {
-      return res.status(404).json({
-        message: "Usuário informado não existe ou está inativo.",
-      });
-    }
+//     if (!usuarioAlvo || !usuarioAlvo.active) {
+//       return res.status(404).json({
+//         message: "Usuário informado não existe ou está inativo.",
+//       });
+//     }
 
-    const horariosReq = horarios.map((h: any) => {
-      const inicio = DateTime.fromISO(`${h.data}T${h.horaInicio}`, {
-        zone: TZ,
-      }).toUTC();
-      const fim = DateTime.fromISO(`${h.data}T${h.horaFim}`, {
-        zone: TZ,
-      }).toUTC();
-      return { ...h, inicio, fim, diaSemana: inicio.weekday };
-    });
+//     const horariosReq = horarios.map((h: any) => {
+//       const inicio = DateTime.fromISO(`${h.data}T${h.horaInicio}`, {
+//         zone: TZ,
+//       }).toUTC();
+//       const fim = DateTime.fromISO(`${h.data}T${h.horaFim}`, {
+//         zone: TZ,
+//       }).toUTC();
+//       return { ...h, inicio, fim, diaSemana: inicio.weekday };
+//     });
 
-    const whereCondition: any = { active: true };
-    const isFilteredSearch =
-      !!numeroSala ||
-      !!bloco ||
-      (tipo && tipo !== "all") ||
-      !!especialidadeRoom;
+//     const whereCondition: any = { active: true };
+//     const isFilteredSearch =
+//       !!numeroSala ||
+//       !!bloco ||
+//       (tipo && tipo !== "all") ||
+//       !!especialidadeRoom;
 
-    if (numeroSala) {
-      whereCondition.ID_Ambiente = {
-        contains: numeroSala,
-        mode: "insensitive",
-      };
-    }
-    if (tipo && tipo !== "all") whereCondition.tipo = tipo;
-    if (bloco) whereCondition.blocoId = bloco;
-    if (especialidadeRoom != null)
-      whereCondition.especialidadeId = especialidadeRoom;
-    if (!isFilteredSearch && lastRoomId > -1) {
-      whereCondition.id = { gt: lastRoomId };
-    }
+//     if (numeroSala) {
+//       whereCondition.ID_Ambiente = {
+//         contains: numeroSala,
+//         mode: "insensitive",
+//       };
+//     }
+//     if (tipo && tipo !== "all") whereCondition.tipo = tipo;
+//     if (bloco) whereCondition.blocoId = bloco;
+//     if (especialidadeRoom != null)
+//       whereCondition.especialidadeId = especialidadeRoom;
+//     if (!isFilteredSearch && lastRoomId > -1) {
+//       whereCondition.id = { gt: lastRoomId };
+//     }
 
-    const salas = await prisma.room.findMany({
-      where: whereCondition,
-      orderBy: { id: "asc" },
-      include: {
-        bloco: true,
-        especialidade: true,
-        periods: {
-          where: { end: { gte: agoraUTC.toJSDate() } },
-        },
-      },
-    });
+//     const salas = await prisma.room.findMany({
+//       where: whereCondition,
+//       orderBy: { id: "asc" },
+//       include: {
+//         bloco: true,
+//         especialidade: true,
+//         periods: {
+//           where: { end: { gte: agoraUTC.toJSDate() } },
+//         },
+//       },
+//     });
 
-    let ultimoIdDaBusca = -1;
-    const salasDisponiveis: typeof salas = [];
+//     let ultimoIdDaBusca = -1;
+//     const salasDisponiveis: typeof salas = [];
 
-    for (const sala of salas) {
-      if (salasDisponiveis.length >= 12) break;
+//     for (const sala of salas) {
+//       if (salasDisponiveis.length >= 12) break;
 
-      const isAvailable = horariosReq.every(
-        (reqHorario: any) =>
-          !sala.periods.some((dbPeriod: any) =>
-            verificarConflitoUniversal(
-              reqHorario.data,
-              reqHorario.horaInicio,
-              reqHorario.horaFim,
-              recorrente,
-              maxTimeRecorrente ?? null,
-              dbPeriod.start,
-              dbPeriod.end,
-              dbPeriod.isRecurring,
-              dbPeriod.maxScheduleTime,
-            ),
-          ),
-      );
+//       const isAvailable = horariosReq.every(
+//         (reqHorario: any) =>
+//           !sala.periods.some((dbPeriod: any) =>
+//             verificarConflitoUniversal(
+//               reqHorario.data,
+//               reqHorario.horaInicio,
+//               reqHorario.horaFim,
+//               recorrente,
+//               maxTimeRecorrente ?? null,
+//               dbPeriod.start,
+//               dbPeriod.end,
+//               dbPeriod.isRecurring,
+//               dbPeriod.maxScheduleTime,
+//             ),
+//           ),
+//       );
 
-      if (isAvailable) {
-        salasDisponiveis.push(sala);
-        ultimoIdDaBusca = sala.id;
-      }
-    }
+//       if (isAvailable) {
+//         salasDisponiveis.push(sala);
+//         ultimoIdDaBusca = sala.id;
+//       }
+//     }
 
-    // ==================================================
-    // 🔥 AQUI ENTRA O AGENTE
-    // ==================================================
+//     // ==================================================
+//     // 🔥 AQUI ENTRA O AGENTE
+//     // ==================================================
 
-    // 1️⃣ Histórico recente do médico
-    const historico = await prisma.periodHistory.findMany({
-      where: { scheduledForId: usuarioAlvo.id },
-      orderBy: { start: "desc" },
-      take: 10,
-    });
+//     // 1️⃣ Histórico recente do médico
+//     const historico = await prisma.periodHistory.findMany({
+//       where: { scheduledForId: usuarioAlvo.id },
+//       orderBy: { start: "desc" },
+//       take: 10,
+//     });
 
-    const preScores = buildPreScoreMap(historico);
+//     const preScores = buildPreScoreMap(historico);
 
-    // 2️⃣ Stats das salas retornadas
-    const stats = await prisma.roomStats.findMany({
-      where: {
-        roomIdAmbiente: {
-          in: salasDisponiveis.map((s) => s.ID_Ambiente),
-        },
-      },
-      orderBy: { monthRef: "desc" },
-    });
+//     // 2️⃣ Stats das salas retornadas
+//     const stats = await prisma.roomStats.findMany({
+//       where: {
+//         roomIdAmbiente: {
+//           in: salasDisponiveis.map((s) => s.ID_Ambiente),
+//         },
+//       },
+//       orderBy: { monthRef: "desc" },
+//     });
 
-    const statsMap = new Map(stats.map((s) => [s.roomIdAmbiente, s]));
+//     const statsMap = new Map(stats.map((s) => [s.roomIdAmbiente, s]));
 
-    // 3️⃣ Funil
-    const funnel = new ScoreFunnel([
-      new SpecialtyAgent(),
-      new UsageAgent(),
-      new ReliabilityAgent(),
-    ]);
+//     // 3️⃣ Funil
+//     const funnel = new ScoreFunnel([
+//       new SpecialtyAgent(),
+//       new UsageAgent(),
+//       new ReliabilityAgent(),
+//     ]);
 
-    const ranked = funnel.run({
-      salas: salasDisponiveis,
-      user: usuarioAlvo.especialidadeId
-        ? { especialidadeId: usuarioAlvo.especialidadeId }
-        : {},
-      statsMap,
-      preScores,
-    });
+//     const ranked = funnel.run({
+//       salas: salasDisponiveis,
+//       user: usuarioAlvo.especialidadeId
+//         ? { especialidadeId: usuarioAlvo.especialidadeId }
+//         : {},
+//       statsMap,
+//       preScores,
+//     });
 
-    // ==================================================
-    // Retorno
-    // ==================================================
-    const indiceUltimaSala = salas.findIndex((s) => s.id === ultimoIdDaBusca);
-    const temMaisSalas =
-      ultimoIdDaBusca > -1 &&
-      salasDisponiveis.length === 12 &&
-      indiceUltimaSala < salas.length - 1;
+//     // ==================================================
+//     // Retorno
+//     // ==================================================
+//     const indiceUltimaSala = salas.findIndex((s) => s.id === ultimoIdDaBusca);
+//     const temMaisSalas =
+//       ultimoIdDaBusca > -1 &&
+//       salasDisponiveis.length === 12 &&
+//       indiceUltimaSala < salas.length - 1;
 
-    return res.status(200).json({
-      salas: ranked.map((r, index) => ({
-        ...mapSala(r.sala),
-        recommended: index === 0,
-        score: r.score,
-        reasons: r.reasons,
-      })),
-      meta: {
-        ultimoIdAchado: ultimoIdDaBusca,
-        temMaisSalas,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    return res
-      .status(500)
-      .json({ message: "Erro ao buscar salas com recomendação." });
-  }
-};
+//     return res.status(200).json({
+//       salas: ranked.map((r, index) => ({
+//         ...mapSala(r.sala),
+//         recommended: index === 0,
+//         score: r.score,
+//         reasons: r.reasons,
+//       })),
+//       meta: {
+//         ultimoIdAchado: ultimoIdDaBusca,
+//         temMaisSalas,
+//       },
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     return res
+//       .status(500)
+//       .json({ message: "Erro ao buscar salas com recomendação." });
+//   }
+// };
 
 // ----------------------
 // AGENDAR SALA

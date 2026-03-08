@@ -1,5 +1,5 @@
 // src/routes/roomRoutes.ts
-import { Router, RequestHandler } from "express";
+import { Router } from "express";
 import {
   createRoom,
   listRooms,

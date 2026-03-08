@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  changePass,
   createBloco,
   createEspecialidadeRoom,
   createEspecialidadeUser,
@@ -9,6 +10,7 @@ import {
   deleteEspecialidadeUser,
   deleteUser,
   editBloco,
+  editMySelf,
   editUser,
   getRoomFilters,
   listBlocos,
@@ -16,6 +18,7 @@ import {
   listUsers,
   listUsersDesactive,
   listUsersEspecialidades,
+  myInfo,
   updateEspecialidadeRoom,
   updateEspecialidadeUser,
 } from "../controllers/configControllers";
@@ -30,6 +33,7 @@ router.get("/rooms/filters", authenticateToken, getRoomFilters);
 
 //especialidades salas
 router.get("/rooms/especialidades", authenticateToken, listRoomEspecialidades);
+
 router.post(
   "/rooms/especialidades",
   authenticateToken,
@@ -53,18 +57,21 @@ router.delete(
 // especialidade users
 //-------------------------------------------------
 router.get("/users/especialidades", authenticateToken, listUsersEspecialidades);
+
 router.post(
   "/users/especialidades",
   authenticateToken,
   requireRole(["boss"]),
   createEspecialidadeUser,
 );
+
 router.put(
   "/users/especialidades/:id",
   authenticateToken,
   requireRole(["boss"]),
   updateEspecialidadeUser,
 );
+
 router.delete(
   "/users/especialidades/:id",
   authenticateToken,
@@ -76,20 +83,28 @@ router.delete(
 // Users
 //------------------------------------------------
 router.get("/users", authenticateToken, requireRole(["boss"]), listUsers);
+
 router.get(
   "/users/desactive",
   authenticateToken,
   requireRole(["boss"]),
   listUsersDesactive,
 );
+
 router.post("/users", authenticateToken, requireRole(["boss"]), createUser);
+
 router.put("/users/:id", authenticateToken, requireRole(["boss"]), editUser);
+
 router.delete(
   "/users/:id",
   authenticateToken,
   requireRole(["boss"]),
   deleteUser,
 );
+
+router.get("/user-my", authenticateToken, myInfo);
+router.put("/user-my", authenticateToken, editMySelf);
+router.put("/user-pass", authenticateToken, changePass);
 
 //------------------------------------------------
 // Blocos/alas de salas

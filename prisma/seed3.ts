@@ -8,7 +8,7 @@ async function main() {
   console.log("🔎 Buscando usuários e salas...");
 
   const admin = await prisma.user.findFirst({
-    where: { hierarquia: "admin" },
+    where: { hierarquia: "boss" },
   });
 
   if (!admin) {
@@ -42,9 +42,7 @@ async function main() {
     periodsByRoom.get(period.roomId)!.push(period);
   }
 
-  const startOfWeek = DateTime.now()
-    .setZone(TZ)
-    .startOf("week");
+  const startOfWeek = DateTime.now().setZone(TZ).startOf("week");
 
   const novosPeriodos: any[] = [];
   let criados = 0;
@@ -53,7 +51,6 @@ async function main() {
     const dayBase = startOfWeek.plus({ days: dia });
 
     for (const user of users) {
-
       const startHour =
         Math.random() < 0.5
           ? 8 + Math.floor(Math.random() * 3)
@@ -85,7 +82,6 @@ async function main() {
       let salaFinal = null;
 
       for (const sala of rooms) {
-
         const periodos = periodsByRoom.get(sala.id) ?? [];
 
         const newStartMin = startLocal.hour * 60;

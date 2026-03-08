@@ -1,35 +1,27 @@
-import { Router } from 'express';
-import { DashboardController } from '../controllers/dashboardController';
-import { authenticateToken } from '../middlewares/authMiddleware';
+import { Router } from "express";
+import {
+  getOccupation,
+  calculateAverageTime,
+  getBlockGraphAnalytics,
+  getBlockTableAnalytics,
+} from "../controllers/dashboardController";
+import { authenticateToken } from "../middlewares/authMiddleware";
 
 const router = Router();
-const dashboardController = new DashboardController();
-
 // --- Rotas do Dashboard ---
 
 // Taxa de Ocupação (Próximos 7 dias)
-router.get('/occupation', authenticateToken, (req, res) => dashboardController.getOccupation(req, res));
+router.get("/occupation", authenticateToken, getOccupation);
 
-// Tempo Médio de Uso (Período personalizado)
-router.post('/tempoMedio', authenticateToken, (req, res) => dashboardController.calculateAverageTime(req, res));
+router.post("/tempoMedio", authenticateToken, calculateAverageTime);
 
+router.post("/dashboard/blocoGraf", getBlockGraphAnalytics);
 
-// 1. Visão Geral (Gráficos)
-// GET /dashboard/general?block=X&month=Y&year=Z
-router.get('/dashboard/general', authenticateToken, (req, res) => dashboardController.getGeneralStats(req, res));
+router.post("/dashboard/blocotable", getBlockTableAnalytics);
 
-// 2. Lista de Salas (Com busca por nome/bloco)
-// // GET /dashboard/rooms?block=X&month=Y&year=Z&search=Sala1
-// router.get('/dashboard/rooms', authenticateToken, (req, res) => dashboardController.getRoomsList(req, res));
+// lista iformações pra tabela e pra grafico da sala em especifico, do min ao max, vai gerar um lista dos dias
+// router.get("/dashboard/roomstable/:id", dashboardController.getRoomAnalytics);
+// router.get("/dashboard/roomsgrafc/:id", dashboardController.getRoomAnalytics);
 
-// // 3. Lista de Usuários (Com busca por nome/login)
-// // GET /dashboard/users?block=X&month=Y&year=Z&search=joao
-// router.get('/dashboard/users', authenticateToken, (req, res) => dashboardController.getUsersList(req, res));
-
-// // 4. Detalhe da Sala
-// // GET /dashboard/room-detail?roomId=SALA-101&month=Y&year=Z
-// router.get('/dashboard/room-detail', authenticateToken, (req, res) => dashboardController.getIndividualRoomStats(req, res));
-
-// router.get('/dashboard/user-detail', authenticateToken, (req, res) => dashboardController.getIndividualUserStats(req, res))
-
+// router.get("/dashboard/users", dashboardController.getUsersAnalytics);
 export default router;
