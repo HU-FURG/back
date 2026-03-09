@@ -31,6 +31,7 @@ app.use(express.static(path.join(__dirname, "../public")));
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3333",
+  "https://sgs.hu-furg.ebserh",
   "https://precious-reyna-hu-furg-b9ddc9e2.koyeb.app",
 ];
 
