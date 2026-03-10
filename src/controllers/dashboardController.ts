@@ -350,3 +350,228 @@ export async function getBlockTableAnalytics(req: Request, res: Response) {
     });
   }
 }
+
+export async function getRoomGraphAnalytics(req: Request, res: Response) {
+  try {
+    const { roomId, dataMin, dataMax, diaUtil } = req.body;
+
+    const start = new Date(dataMin);
+    const end = new Date(dataMax);
+
+    if (!roomId || isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ error: "Parâmetros inválidos" });
+    }
+
+    const periods = await prisma.periodHistory.findMany({
+      where: {
+        roomIdAmbiente: roomId,
+        start: {
+          gte: start,
+          lte: end,
+        },
+      },
+      orderBy: { start: "asc" },
+    });
+
+    const dayMap = new Map<
+      string,
+      { scheduleMinutes: number; usedMinutes: number }
+    >();
+
+    for (const p of periods) {
+      const date = p.start.toISOString().split("T")[0];
+      const weekday = new Date(p.start).getDay();
+
+      if (diaUtil && (weekday === 0 || weekday === 6)) continue;
+
+      const current = dayMap.get(date) ?? {
+        scheduleMinutes: 0,
+        usedMinutes: 0,
+      };
+
+      const duration = p.durationMinutes ?? 0;
+      const used = p.actualDurationMinutes ?? 0;
+
+      current.scheduleMinutes += duration;
+      current.usedMinutes += used;
+
+      dayMap.set(date, current);
+    }
+
+    const graph = [];
+
+    for (const [date, value] of dayMap.entries()) {
+      graph.push({
+        date,
+        scheduleMinutes: value.scheduleMinutes,
+        usedMinutes: value.usedMinutes,
+      });
+    }
+
+    return res.json(graph);
+  } catch (error) {
+    console.error("❌ getRoomGraphAnalytics error:", error);
+    return res.status(500).json([]);
+  }
+}
+
+export async function getRoomTableAnalytics(req: Request, res: Response) {
+  try {
+    const { roomId, dataMin, dataMax, diaUtil, tempoUtilHoras } = req.body;
+
+    const start = new Date(dataMin);
+    const end = new Date(dataMax);
+
+    if (!roomId || isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ error: "Parâmetros inválidos" });
+    }
+
+    const periods = await prisma.periodHistory.findMany({
+      where: {
+        roomIdAmbiente: roomId,
+        start: {
+          gte: start,
+          lte: end,
+        },
+      },
+      orderBy: {
+        start: "asc",
+      },
+      select: {
+        id: true,
+        start: true,
+        end: true,
+        weekday: true,
+        used: true,
+
+        durationMinutes: true,
+        actualDurationMinutes: true,
+
+        createdByLogin: true,
+        createdByNome: true,
+
+        scheduledForLogin: true,
+        scheduledForNome: true,
+
+        availabilityStatus: true,
+        typeSchedule: true,
+      },
+    });
+
+    let totalScheduleMin = 0;
+    let totalUsedMin = 0;
+
+    const daySet = new Set<string>();
+
+    for (const p of periods) {
+      const weekday = new Date(p.start).getDay();
+      if (diaUtil && (weekday === 0 || weekday === 6)) continue;
+
+      const date = p.start.toISOString().split("T")[0];
+      daySet.add(date);
+
+      totalScheduleMin += p.durationMinutes ?? 0;
+      totalUsedMin += p.actualDurationMinutes ?? 0;
+    }
+
+    const dias = daySet.size;
+
+    const tempoUtilMin = tempoUtilHoras * 60;
+    const capacidadeTotal = dias * tempoUtilMin;
+
+    const taxaUso = capacidadeTotal > 0 ? totalUsedMin / capacidadeTotal : 0;
+
+    const summary = {
+      roomId,
+      dias,
+      tempoAgendado: Math.round(totalScheduleMin / 60),
+      tempoUsado: Math.round(totalUsedMin / 60),
+      taxaUso,
+    };
+
+    return res.json({
+      summary,
+      periods,
+    });
+  } catch (error) {
+    console.error("❌ getRoomTableAnalytics error:", error);
+
+    return res.status(500).json({
+      summary: {
+        roomId: null,
+        dias: 0,
+        tempoAgendado: 0,
+        tempoUsado: 0,
+        taxaUso: 0,
+      },
+      periods: [],
+    });
+  }
+}
+
+export async function getRoomTopUsers(req: Request, res: Response) {
+  try {
+    const { roomId, dataMin, dataMax, diaUtil } = req.body;
+
+    const start = new Date(dataMin);
+    const end = new Date(dataMax);
+
+    const periods = await prisma.periodHistory.findMany({
+      where: {
+        roomIdAmbiente: roomId,
+        start: {
+          gte: start,
+          lte: end,
+        },
+      },
+      select: {
+        scheduledForLogin: true,
+        scheduledForNome: true,
+        actualDurationMinutes: true,
+        start: true,
+      },
+    });
+
+    const userMap = new Map<
+      string,
+      { nome: string; count: number; usedMinutes: number }
+    >();
+
+    for (const p of periods) {
+      const weekday = new Date(p.start).getDay();
+      if (diaUtil && (weekday === 0 || weekday === 6)) continue;
+
+      const login = p.scheduledForLogin ?? "desconhecido";
+      const nome = p.scheduledForNome ?? "Desconhecido";
+
+      const current = userMap.get(login) ?? {
+        nome,
+        count: 0,
+        usedMinutes: 0,
+      };
+
+      current.count += 1;
+      current.usedMinutes += p.actualDurationMinutes ?? 0;
+
+      userMap.set(login, current);
+    }
+
+    const users = [];
+
+    for (const [login, value] of userMap.entries()) {
+      users.push({
+        login,
+        nome: value.nome,
+        usos: value.count,
+        horasUsadas: Math.round(value.usedMinutes / 60),
+      });
+    }
+
+    users.sort((a, b) => b.usos - a.usos);
+
+    return res.json(users.slice(0, 10)); // top 10
+  } catch (error) {
+    console.error("❌ getRoomTopUsers error:", error);
+    return res.status(500).json([]);
+  }
+}

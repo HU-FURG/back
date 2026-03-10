@@ -16,9 +16,33 @@ const JWT_SECRET = process.env.JWT_SECRET || "supersecretkey";
 export const login = async (req: Request, res: Response) => {
   const { login, senha, remember } = loginSchema.parse(req.body);
 
-  const user = await prisma.user.findUnique({
-    where: { login },
-  });
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const loginRegex = /^[a-zA-Z0-9.]+$/;
+
+  let user = null;
+
+  // se for email
+  if (emailRegex.test(login)) {
+    user = await prisma.user.findUnique({
+      where: { email: login.toLowerCase() },
+    });
+  }
+
+  // se não encontrou ou não era email → tenta login
+  if (!user) {
+    if (!loginRegex.test(login)) {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_LOGIN_FORMAT",
+          message: "Login contém caracteres inválidos",
+        },
+      });
+    }
+
+    user = await prisma.user.findUnique({
+      where: { login: login.toLowerCase() },
+    });
+  }
 
   if (!user) {
     return res.status(401).json({
@@ -77,7 +101,6 @@ export const login = async (req: Request, res: Response) => {
     nome: user.nome,
   });
 };
-
 export async function validateToken(req: Request, res: Response) {
   const { login } = (req as any).user;
   console.log("🔐 Token validado para:", login);
@@ -122,92 +145,105 @@ const createUserSchema = z.object({
 });
 
 export async function createUser(req: Request, res: Response) {
-  const {
-    login,
-    senha,
-    cargo,
-    nome,
-    email,
-    especialidadeId,
-    descricao,
-    telefone,
-  } = createUserSchema.parse(req.body);
+  try {
+    const {
+      login,
+      senha,
+      cargo,
+      nome,
+      email,
+      especialidadeId,
+      descricao,
+      telefone,
+    } = createUserSchema.parse(req.body);
 
-  // 🔎 login duplicado
-  const existingLogin = await prisma.user.findUnique({
-    where: { login },
-  });
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const loginRegex = /^[a-zA-Z0-9.]+$/;
 
-  if (existingLogin) {
-    return res.status(400).json({ error: "Usuário já existe" });
-  }
+    // 🔒 valida login
+    if (!loginRegex.test(login)) {
+      return res.status(400).json({
+        error: "Login só pode conter letras, números e ponto",
+      });
+    }
 
-  const exitingSpecialidade = especialidadeId
-    ? await prisma.especialidadeUser.findUnique({
-        where: { id: especialidadeId },
-      })
-    : false;
+    // 🔒 valida email
+    if (email && !emailRegex.test(email)) {
+      return res.status(400).json({
+        error: "E-mail inválido",
+      });
+    }
 
-  if (especialidadeId && !exitingSpecialidade) {
-    return res.status(400).json({ error: "Especialidade não existe" });
-  }
-
-  let especialidadeIdAdmin: number | undefined = undefined;
-
-  if (cargo === "admin") {
-    especialidadeIdAdmin = await prisma.especialidadeUser
-      .findFirst({
-        where: { nome: "Administrador" },
-      })
-      .then((e) => e?.id);
-  }
-
-  // 🔎 email duplicado
-  if (email) {
-    const existingEmail = await prisma.user.findUnique({
-      where: { email },
+    const existingLogin = await prisma.user.findUnique({
+      where: { login },
     });
 
-    if (existingEmail) {
-      return res.status(400).json({ error: "E-mail já está em uso" });
+    if (existingLogin) {
+      return res.status(400).json({ error: "Usuário já existe" });
     }
+
+    console.log("xiste");
+
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({
+        where: { email: email },
+      });
+
+      if (existingEmail) {
+        return res.status(400).json({ error: "E-mail já está em uso" });
+      }
+    }
+
+    let hashedPassword: string;
+
+    if (cargo === "user") {
+      hashedPassword = await bcrypt.hash("hospital", 10);
+    } else {
+      hashedPassword = await bcrypt.hash(senha, 10);
+    }
+
+    const hierarquia = cargo === "admin" ? Hierarquia.admin : Hierarquia.user;
+
+    const newUser = await prisma.user.create({
+      data: {
+        login,
+        senha: hashedPassword,
+        hierarquia,
+        nome: nome || login,
+        email: email ?? null,
+        telefone,
+        descricao,
+        active: true,
+        especialidadeId: especialidadeId ?? null,
+      },
+      include: {
+        especialidade: true,
+      },
+    });
+
+    return res.status(201).json(newUser);
+  } catch (error: any) {
+    // 🔴 erro de campo único (login ou email duplicado)
+    if (error.code === "P2002") {
+      const field = error.meta?.target?.[0];
+
+      if (field === "email") {
+        return res.status(400).json({ error: "E-mail já está em uso" });
+      }
+
+      if (field === "login") {
+        return res.status(400).json({ error: "Login já está em uso" });
+      }
+
+      return res.status(400).json({ error: "Valor duplicado" });
+    }
+
+    console.error(error);
+
+    return res.status(500).json({
+      error: "Erro interno ao criar usuário",
+    });
   }
-
-  let hashedPassword: string;
-
-  // 🔐 hash da senha
-  if (cargo === "user") {
-    hashedPassword = await bcrypt.hash("hospital", 10);
-  } else {
-    hashedPassword = await bcrypt.hash(senha, 10);
-  }
-
-  // 🧠 hierarquia
-  const hierarquia = cargo === "admin" ? Hierarquia.admin : Hierarquia.user;
-
-  const newUser = await prisma.user.create({
-    data: {
-      login,
-      senha: hashedPassword,
-      hierarquia,
-      nome: nome || login,
-      email,
-      telefone,
-      descricao,
-      active: true,
-      especialidadeId:
-        hierarquia === Hierarquia.admin
-          ? especialidadeIdAdmin
-          : (especialidadeId ?? null),
-    },
-    include: {
-      especialidade: true,
-    },
-  });
-
-  console.log("Usuário criado:", newUser.login, "-", newUser.hierarquia);
-
-  return res.status(201).json(newUser);
 }
 
 const publicUserSelect = {

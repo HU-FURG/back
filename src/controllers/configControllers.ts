@@ -6,6 +6,54 @@ import { DateTime } from "luxon";
 import { validateUserPayload } from "../auxiliar/validarUser";
 import { archiveCanceledPeriods } from "../auxiliar/cancelSchecule/auxiCancelSchedule";
 
+export async function validateUseremailoginPayload(
+  data: { email?: string; login?: string },
+  res: Response,
+  options: { mode: "create" | "edit"; userId?: number },
+) {
+  const { email, login } = data;
+  const { mode, userId } = options;
+
+  // =========================
+  // EMAIL DUPLICADO
+  // =========================
+  if (email) {
+    const emailExists = await prisma.user.findFirst({
+      where: {
+        email,
+        ...(mode === "edit" && userId ? { NOT: { id: userId } } : {}),
+      },
+    });
+
+    if (emailExists) {
+      res.status(409).json({
+        message: "E-mail já está em uso.",
+      });
+      return false;
+    }
+  }
+
+  // =========================
+  // LOGIN DUPLICADO
+  // =========================
+  if (login) {
+    const loginExists = await prisma.user.findFirst({
+      where: {
+        login,
+        ...(mode === "edit" && userId ? { NOT: { id: userId } } : {}),
+      },
+    });
+
+    if (loginExists) {
+      res.status(409).json({
+        message: "Login já está em uso.",
+      });
+      return false;
+    }
+  }
+
+  return true;
+}
 //------------------------------------------------
 // Room Filters blocos e especialidades para typagem
 //------------------------------------------------
@@ -223,6 +271,15 @@ export async function createUser(req: Request, res: Response) {
 
     const data = schema.parse(req.body);
 
+    const loginRegex = /^[a-zA-Z0-9.]+$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (data.email && !emailRegex.test(data.email)) {
+      return res.status(400).json({
+        error: "E-mail inválido.",
+      });
+    }
+
     let loginFinal = "";
 
     let especialidadeFinal: number | null = null;
@@ -245,6 +302,18 @@ export async function createUser(req: Request, res: Response) {
       especialidadeFinal = especialidadeAdmin?.id ?? null;
     }
 
+    if (loginFinal && !loginRegex.test(loginFinal)) {
+      return res.status(400).json({
+        error: "Login só pode conter letras, números e ponto.",
+      });
+    }
+
+    const valid = await validateUserPayload({ email: data.email }, res, {
+      mode: "edit",
+      userId: authUser.userId,
+    });
+
+    if (!valid) return;
     // =========================
     // 🛠 ADMIN (com áreas)
     // =========================
@@ -658,6 +727,16 @@ export async function editMySelf(req: Request, res: Response) {
       where: { id: authUser.userId },
     });
 
+    const valid = await validateUseremailoginPayload(
+      {
+        email: data.email,
+      },
+      res,
+      { mode: "create" },
+    );
+
+    if (!valid) return;
+
     if (!user) {
       return res.status(404).json({
         message: "Usuário não encontrado",
@@ -687,6 +766,7 @@ export async function editMySelf(req: Request, res: Response) {
     });
   }
 }
+
 export async function changePass(req: Request, res: Response) {
   const schema = z.object({
     senhaAtual: z.string(),
@@ -762,61 +842,37 @@ export async function listRoomEspecialidades(req: Request, res: Response) {
 
   return res.json({ data: especialidades });
 }
-
 export async function createEspecialidadeRoom(req: Request, res: Response) {
-  const schema = z.object({
-    nome: z.string(),
-    especialidadesAceitas: z.array(z.number()).optional(),
-  });
+  try {
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
+      especialidadesAceitas: z.array(z.number()).optional(),
+    });
 
-  const data = schema.parse(req.body);
+    const data = schema.parse(req.body);
+    const nomeFormatado = data.nome.trim();
 
-  const roomEsp = await prisma.especialidadeRoom.create({
-    data: {
-      nome: data.nome,
-      ...(data.especialidadesAceitas && {
-        especialidadesAceitas: {
-          connect: data.especialidadesAceitas.map((id) => ({ id })),
+    const existing = await prisma.especialidadeRoom.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
         },
-      }),
-    },
-    include: {
-      especialidadesAceitas: {
-        select: { id: true, nome: true },
       },
-    },
-  });
+    });
 
-  return res.status(201).json(roomEsp);
-}
+    if (existing) {
+      return res.status(400).json({
+        error: "Já existe uma especialidade de sala com esse nome.",
+      });
+    }
 
-export async function updateEspecialidadeRoom(req: Request, res: Response) {
-  const schema = z.object({
-    nome: z.string(),
-    especialidadesAceitas: z.array(z.number()).optional(),
-  });
-
-  const { id } = req.params;
-  const roomId = Number(id);
-
-  const data = schema.parse(req.body);
-
-  const existing = await prisma.especialidadeRoom.findUnique({
-    where: { id: roomId },
-  });
-
-  if (!existing) {
-    return res.status(404).json({ error: "Especialidade não encontrada" });
-  }
-
-  const updated = await prisma.$transaction(async (tx) => {
-    return tx.especialidadeRoom.update({
-      where: { id: roomId },
+    const roomEsp = await prisma.especialidadeRoom.create({
       data: {
-        nome: data.nome,
+        nome: nomeFormatado,
         ...(data.especialidadesAceitas && {
           especialidadesAceitas: {
-            set: data.especialidadesAceitas.map((id) => ({ id })),
+            connect: data.especialidadesAceitas.map((id) => ({ id })),
           },
         }),
       },
@@ -826,11 +882,103 @@ export async function updateEspecialidadeRoom(req: Request, res: Response) {
         },
       },
     });
-  });
 
-  return res.json(updated);
+    return res.status(201).json(roomEsp);
+  } catch (error) {
+    console.error("Erro ao criar especialidadeRoom:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+    });
+  }
 }
+export async function updateEspecialidadeRoom(req: Request, res: Response) {
+  try {
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
+      especialidadesAceitas: z.array(z.number()).optional(),
+    });
 
+    const { id } = req.params;
+    const roomId = Number(id);
+
+    if (Number.isNaN(roomId)) {
+      return res.status(400).json({
+        error: "ID inválido",
+      });
+    }
+
+    const data = schema.parse(req.body);
+    const nomeFormatado = data.nome.trim();
+
+    const existing = await prisma.especialidadeRoom.findUnique({
+      where: { id: roomId },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        error: "Especialidade não encontrada",
+      });
+    }
+
+    const duplicate = await prisma.especialidadeRoom.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
+        NOT: { id: roomId },
+      },
+    });
+
+    if (duplicate) {
+      return res.status(400).json({
+        error: "Já existe uma especialidade de sala com esse nome.",
+      });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      return tx.especialidadeRoom.update({
+        where: { id: roomId },
+        data: {
+          nome: nomeFormatado,
+          ...(data.especialidadesAceitas && {
+            especialidadesAceitas: {
+              set: data.especialidadesAceitas.map((id) => ({ id })),
+            },
+          }),
+        },
+        include: {
+          especialidadesAceitas: {
+            select: { id: true, nome: true },
+          },
+        },
+      });
+    });
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("Erro ao atualizar especialidadeRoom:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor",
+    });
+  }
+}
 export async function deleteEspecialidadeRoom(req: Request, res: Response) {
   const { id } = req.params;
   const roomId = Number(id);
@@ -882,78 +1030,136 @@ export async function listUsersEspecialidades(req: Request, res: Response) {
 }
 
 export async function createEspecialidadeUser(req: Request, res: Response) {
-  const schema = z.object({
-    nome: z.string().min(1, "Nome é obrigatório"),
-  });
+  try {
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
+    });
 
-  const { nome } = schema.parse(req.body);
-  const nomeFormatado = nome.trim();
+    const { nome } = schema.parse(req.body);
+    const nomeFormatado = nome.trim();
 
-  const existing = await prisma.especialidadeUser.findFirst({
-    where: {
-      nome: {
-        equals: nomeFormatado,
-        mode: "insensitive",
+    const existing = await prisma.especialidadeUser.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
       },
-    },
-  });
+    });
 
-  if (existing) {
-    return res.status(400).json({
-      error: "Já existe uma especialidade com esse nome.",
+    if (existing) {
+      return res.status(400).json({
+        error: "Já existe uma especialidade com esse nome.",
+      });
+    }
+
+    const esp = await prisma.especialidadeUser.create({
+      data: { nome: nomeFormatado },
+    });
+
+    return res.status(201).json(esp);
+  } catch (error) {
+    console.error("Erro ao criar especialidade:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos.",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor.",
     });
   }
-
-  const esp = await prisma.especialidadeUser.create({
-    data: { nome: nomeFormatado },
-  });
-
-  return res.status(201).json(esp);
 }
 
 export async function updateEspecialidadeUser(req: Request, res: Response) {
-  const schema = z.object({
-    nome: z.string().min(1, "Nome é obrigatório"),
-  });
-
-  const { id } = req.params;
-  const userId = Number(id);
-
-  const { nome } = schema.parse(req.body);
-  const nomeFormatado = nome.trim();
-
-  const existing = await prisma.especialidadeUser.findUnique({
-    where: { id: userId },
-  });
-
-  if (!existing) {
-    return res.status(404).json({
-      error: "Especialidade não encontrada.",
+  try {
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
     });
-  }
 
-  const duplicate = await prisma.especialidadeUser.findFirst({
-    where: {
-      nome: {
-        equals: nomeFormatado,
-        mode: "insensitive",
+    const { id } = req.params;
+    const userId = Number(id);
+
+    if (Number.isNaN(userId)) {
+      return res.status(400).json({
+        error: "ID inválido.",
+      });
+    }
+
+    const { nome } = schema.parse(req.body);
+    const nomeFormatado = nome.trim();
+
+    const existing = await prisma.especialidadeUser.findUnique({
+      where: { id: userId },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        error: "Especialidade não encontrada.",
+      });
+    }
+
+    // 🔒 Administrador é protegido
+    if (existing.nome.toLowerCase() === "administrador") {
+      return res.status(403).json({
+        error: "A especialidade 'Administrador' não pode ser alterada.",
+      });
+    }
+
+    const existingNewUpate = await prisma.especialidadeUser.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
       },
-      NOT: { id: userId },
-    },
-  });
+    });
 
-  if (duplicate) {
-    return res.status(400).json({
-      error: "Já existe uma especialidade com esse nome.",
+    if (existingNewUpate) {
+      return res.status(400).json({
+        error: "Já existe uma especialidade com esse nome.",
+      });
+    }
+
+    const duplicate = await prisma.especialidadeUser.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
+        NOT: { id: userId },
+      },
+    });
+
+    if (duplicate) {
+      return res.status(400).json({
+        error: "Já existe uma especialidade com esse nome.",
+      });
+    }
+
+    const updated = await prisma.especialidadeUser.update({
+      where: { id: userId },
+      data: { nome: nomeFormatado },
+    });
+
+    return res.json(updated);
+  } catch (error) {
+    console.error("Erro ao atualizar especialidade:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos.",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor.",
     });
   }
-
-  const updated = await prisma.especialidadeUser.update({
-    where: { id: userId },
-    data: { nome: nomeFormatado },
-  });
-
-  return res.json(updated);
 }
 
 export async function deleteEspecialidadeUser(req: Request, res: Response) {
@@ -1028,34 +1234,113 @@ export async function listBlocos(req: Request, res: Response) {
 }
 
 export async function createBloco(req: Request, res: Response) {
-  const schema = z.object({
-    nome: z.string().min(1),
-  });
+  try {
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
+    });
 
-  const { nome } = schema.parse(req.body);
+    const { nome } = schema.parse(req.body);
+    const nomeFormatado = nome.trim();
 
-  const bloco = await prisma.blocoRoom.create({
-    data: { nome },
-  });
+    const existing = await prisma.blocoRoom.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
+      },
+    });
 
-  return res.status(201).json(bloco);
+    if (existing) {
+      return res.status(400).json({
+        error: "Já existe um bloco com esse nome.",
+      });
+    }
+
+    const bloco = await prisma.blocoRoom.create({
+      data: { nome: nomeFormatado },
+    });
+
+    return res.status(201).json(bloco);
+  } catch (error) {
+    console.error("Erro ao criar bloco:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos.",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor.",
+    });
+  }
 }
 
 export async function editBloco(req: Request, res: Response) {
-  const id = Number(req.params.id);
+  try {
+    const id = Number(req.params.id);
 
-  const schema = z.object({
-    nome: z.string().min(1),
-  });
+    if (Number.isNaN(id)) {
+      return res.status(400).json({
+        error: "ID inválido.",
+      });
+    }
 
-  const { nome } = schema.parse(req.body);
+    const schema = z.object({
+      nome: z.string().min(1, "Nome é obrigatório"),
+    });
 
-  const bloco = await prisma.blocoRoom.update({
-    where: { id },
-    data: { nome },
-  });
+    const { nome } = schema.parse(req.body);
+    const nomeFormatado = nome.trim();
 
-  return res.json(bloco);
+    const existing = await prisma.blocoRoom.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        error: "Bloco não encontrado.",
+      });
+    }
+
+    const duplicate = await prisma.blocoRoom.findFirst({
+      where: {
+        nome: {
+          equals: nomeFormatado,
+          mode: "insensitive",
+        },
+        NOT: { id },
+      },
+    });
+
+    if (duplicate) {
+      return res.status(400).json({
+        error: "Já existe um bloco com esse nome.",
+      });
+    }
+
+    const bloco = await prisma.blocoRoom.update({
+      where: { id },
+      data: { nome: nomeFormatado },
+    });
+
+    return res.json(bloco);
+  } catch (error) {
+    console.error("Erro ao atualizar bloco:", error);
+
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Dados inválidos.",
+        details: error.errors,
+      });
+    }
+
+    return res.status(500).json({
+      error: "Erro interno do servidor.",
+    });
+  }
 }
 
 export async function deleteBloco(req: Request, res: Response) {
