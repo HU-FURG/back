@@ -646,7 +646,7 @@ export const agendarSala = async (req: Request, res: Response) => {
       return {
         roomId: salaId,
         createdById: usuarioLogado.id,
-        scheduledForId: finalScheduledForId,
+        scheduledForId: scheduledForId,
 
         start: inicioUTC.toJSDate(),
         end: fimUTC.toJSDate(),
