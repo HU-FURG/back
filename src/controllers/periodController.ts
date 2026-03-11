@@ -486,7 +486,7 @@ export const agendarSala = async (req: Request, res: Response) => {
     // =========================
     // 2️⃣ Definir PARA QUEM é o agendamento
     // =========================
-    let finalScheduledForId = usuarioLogado.id;
+    let finalScheduledForId = scheduledForId;
 
     if (usuarioLogado.hierarquia === "admin") {
       if (!scheduledForId) {
