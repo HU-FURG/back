@@ -23,7 +23,7 @@ router.get(
 router.delete(
   "/myreserve/:id",
   authenticateToken,
-  requireRole(["user", "admin"]),
+  requireRole(["boss", "admin"]),
   cancelarReserva,
 );
 

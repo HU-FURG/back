@@ -765,7 +765,7 @@ export async function listarMinhasReservas(req: Request, res: Response) {
 export async function cancelarReserva(req: Request, res: Response) {
   const { userId, hierarquia } = (req as any).user;
   const reservaId = Number(req.params.id);
-
+  console.log(hierarquia);
   if (!userId) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
